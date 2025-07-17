@@ -28,7 +28,7 @@ except (FileNotFoundError, json.JSONDecodeError):
     VERSION = "1.0.0"
 
 HELP_TEXT = f"""
-Usage: ccr [command]
+Usage: python3 cli.py [command]
 
 Commands:
   start         Start service 
@@ -39,8 +39,8 @@ Commands:
   -h, help      Show help information
 
 Example:
-  ccr start
-  ccr code "Write a Hello World"
+  python3 cli.py start
+  python3 cli.py code "Write a Hello World"
 """
 
 async def wait_for_service(timeout: int = 10000, initial_delay: int = 1000) -> bool:
@@ -103,7 +103,7 @@ async def main():
                 if await wait_for_service():
                     await execute_code_command(sys.argv[2:])
                 else:
-                    print("Service startup timeout, please manually run `ccr start` to start the service")
+                    print("Service startup timeout, please manually run `python3 cli.py start` to start the service")
                     sys.exit(1)
             except Exception as error:
                 print(f"Failed to start service: {error}")

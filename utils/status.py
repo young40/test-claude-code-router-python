@@ -19,12 +19,12 @@ def show_status():
         print(f'📄 PID File: {info["pid_file"]}')
         print('')
         print('🚀 Ready to use! Run the following commands:')
-        print('   ccr code    # Start coding with Claude')
-        print('   ccr stop   # Stop the service')
+        print('   python3 cli.py code    # Start coding with Claude')
+        print('   python3 cli.py stop   # Stop the service')
     else:
         print('❌ Status: Not Running')
         print('')
         print('💡 To start the service:')
-        print('   ccr start')
+        print('   python3 cli.py start')
     
     print('')

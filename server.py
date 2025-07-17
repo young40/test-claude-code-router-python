@@ -11,15 +11,28 @@ class RequestHandler(BaseHTTPRequestHandler):
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
+        print(f"\n📥 GET Request received: {self.path}")
+        print(f"📋 Headers: {self.headers}")
+        
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         response = {"status": "running", "message": "Claude Code Router is running"}
         self.wfile.write(json.dumps(response).encode())
+        
+        print(f"📤 Response: {json.dumps(response)}")
     
     def do_POST(self):
         content_length = int(self.headers['Content-Length'])
         post_data = self.rfile.read(content_length)
+        
+        print(f"\n📥 POST Request received: {self.path}")
+        print(f"📋 Headers: {self.headers}")
+        try:
+            decoded_data = json.loads(post_data.decode('utf-8'))
+            print(f"📦 Request Body: {json.dumps(decoded_data, indent=2)}")
+        except:
+            print(f"📦 Request Body (raw): {post_data}")
         
         # Process hooks
         for hook_type, handler in self.server_instance.hooks:
@@ -31,13 +44,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                     else:
                         handler(self, None)
                 except Exception as e:
-                    print(f"Hook error: {e}")
+                    print(f"❌ Hook error: {e}")
         
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         response = {"status": "processed"}
         self.wfile.write(json.dumps(response).encode())
+        
+        print(f"📤 Response: {json.dumps(response)}")
     
     def log_message(self, format, *args):
         # Custom logging

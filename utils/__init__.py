@@ -29,10 +29,13 @@ async def confirm(query: str) -> bool:
 
 async def read_config_file() -> Dict[str, Any]:
     """Read configuration file or create one if it doesn't exist"""
+    print(f"📁 Config file path: {CONFIG_FILE}")
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            print(f"✅ Config file found and loaded")
             return json.load(f)
     except FileNotFoundError:
+        print(f"⚠️ Config file not found, creating new one...")
         name = question("Enter Provider Name: ")
         api_key = question("Enter Provider API KEY: ")
         base_url = question("Enter Provider URL: ")

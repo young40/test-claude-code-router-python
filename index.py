@@ -6,12 +6,15 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .constants import CONFIG_FILE
-from .utils import init_config, init_dir
-from .server import create_server
-from .utils.router import router
-from .middleware.auth import api_key_auth
-from .utils.process_check import (
+# Add current directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+from constants import CONFIG_FILE
+from utils import init_config, init_dir
+from server import create_server
+from utils.router import router
+from middleware.auth import api_key_auth
+from utils.process_check import (
     cleanup_pid_file,
     is_service_running,
     save_pid,

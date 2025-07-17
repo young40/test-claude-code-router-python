@@ -3,7 +3,11 @@ import signal
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from ..constants import PID_FILE, REFERENCE_COUNT_FILE
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from constants import PID_FILE, REFERENCE_COUNT_FILE
 
 def increment_reference_count():
     """Increment reference count"""

@@ -3,7 +3,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..constants import HOME_DIR
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from constants import HOME_DIR
 
 LOG_FILE = HOME_DIR / "claude-code-router.log"
 

@@ -3,9 +3,13 @@ import subprocess
 import sys
 from typing import List
 
-from .process_check import increment_reference_count, decrement_reference_count
-from .close import close_service
-from . import read_config_file
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from utils.process_check import increment_reference_count, decrement_reference_count
+from utils.close import close_service
+from utils import read_config_file
 
 async def execute_code_command(args: List[str] = None):
     """Execute claude code command"""

@@ -12,7 +12,11 @@ except ImportError:
             return [0] * (len(text) // 4)
     enc = MockEncoder()
 
-from .log import log
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from utils.log import log
 
 def get_use_model(request: Any, token_count: int, config: Dict[str, Any]) -> str:
     """Determine which model to use based on request and token count"""

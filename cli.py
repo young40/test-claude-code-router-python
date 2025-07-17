@@ -9,11 +9,14 @@ import time
 from pathlib import Path
 from typing import List
 
-from .index import run
-from .utils.status import show_status
-from .utils.code_command import execute_code_command
-from .utils.process_check import cleanup_pid_file, is_service_running
-from .constants import PID_FILE, REFERENCE_COUNT_FILE
+# Add current directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+from index import run
+from utils.status import show_status
+from utils.code_command import execute_code_command
+from utils.process_check import cleanup_pid_file, is_service_running
+from constants import PID_FILE, REFERENCE_COUNT_FILE
 
 # Get version from package.json if available
 try:

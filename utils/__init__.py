@@ -1,9 +1,13 @@
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Any
 
-from ..constants import CONFIG_FILE, DEFAULT_CONFIG, HOME_DIR, PLUGINS_DIR
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from constants import CONFIG_FILE, DEFAULT_CONFIG, HOME_DIR, PLUGINS_DIR
 
 def ensure_dir(dir_path: Path):
     """Ensure directory exists"""

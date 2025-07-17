@@ -1,9 +1,12 @@
 import os
 import signal
+import sys
 from pathlib import Path
 
-from .process_check import is_service_running, cleanup_pid_file, get_reference_count
-from ..constants import HOME_DIR
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from utils.process_check import is_service_running, cleanup_pid_file, get_reference_count
+from constants import HOME_DIR
 
 async def close_service():
     """Close the service if no references remain"""

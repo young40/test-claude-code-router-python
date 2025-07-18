@@ -187,8 +187,13 @@ class Server:
             
             # 启动服务器
             log(f"🚀 LLMs API server listening on http://{host}:{port}")
-            uvicorn.run(self.app, host=host, port=port)
+            import uvicorn
+            config = uvicorn.Config(self.app, host=host, port=port, log_level="info")
+            server = uvicorn.Server(config)
+            await server.serve()
             
         except Exception as error:
+            import traceback
             log(f"Error starting server: {error}")
+            log(traceback.format_exc())
             sys.exit(1)

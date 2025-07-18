@@ -187,5 +187,6 @@ class TransformerService:
     async def load_from_config(self) -> None:
         """Load transformers from configuration"""
         transformers_config = self.config_service.get("transformers", [])
+        print(transformers_config)
         for transformer_config in transformers_config:
             await self.register_transformer_from_config(transformer_config)

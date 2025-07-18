@@ -27,12 +27,14 @@ async def confirm(query: str) -> bool:
     answer = question(query)
     return answer.lower() != "n"
 
-async def read_config_file() -> Dict[str, Any]:
+async def read_config_file(silent: bool = False) -> Dict[str, Any]:
     """Read configuration file or create one if it doesn't exist"""
-    print(f"📁 Config file path: {CONFIG_FILE}")
+    if not silent:
+        print(f"📁 Config file path: {CONFIG_FILE}")
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            print(f"✅ Config file found and loaded")
+            if not silent:
+                print(f"✅ Config file found and loaded")
             return json.load(f)
     except FileNotFoundError:
         print(f"⚠️ Config file not found, creating new one...")
@@ -64,9 +66,9 @@ async def write_config_file(config: Dict[str, Any]):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2)
 
-async def init_config() -> Dict[str, Any]:
+async def init_config(silent: bool = False) -> Dict[str, Any]:
     """Initialize configuration and set environment variables"""
-    config = await read_config_file()
+    config = await read_config_file(silent=silent)
     for key, value in config.items():
         if isinstance(value, str):
             os.environ[key] = value

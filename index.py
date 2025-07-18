@@ -50,13 +50,16 @@ async def run(options: Optional[Dict[str, Any]] = None):
     
     await initialize_claude_config()
     await init_dir()
-    config = await init_config()
+    # Use silent mode if running in background
+    silent_mode = options.get("silent", False)
+    config = await init_config(silent=silent_mode)
     
     host = config.get("HOST", "127.0.0.1")
     
     if config.get("HOST") and not config.get("APIKEY"):
         host = "127.0.0.1"
-        print("⚠️ API key is not set. HOST is forced to 127.0.0.1.")
+        if not silent_mode:
+            print("⚠️ API key is not set. HOST is forced to 127.0.0.1.")
     
     port = options.get("port", 3456)
     
@@ -72,7 +75,8 @@ async def run(options: Optional[Dict[str, Any]] = None):
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    print(host)
+    if not silent_mode:
+        print(host)
     
     # Use port from environment variable if set (for background process)
     service_port = int(os.environ.get("SERVICE_PORT", port))
@@ -89,7 +93,18 @@ async def run(options: Optional[Dict[str, Any]] = None):
     
     server.add_hook("pre_handler", api_key_auth(config))
     server.add_hook("pre_handler", lambda req, reply: asyncio.create_task(router(req, reply, config)))
-    server.start()
+    
+    try:
+        # Start the server (now runs in a separate thread)
+        await server.start()
+        
+        # Keep the main thread alive to handle signals
+        while True:
+            await asyncio.sleep(1)
+    except KeyboardInterrupt:
+        print("Shutting down...")
+    finally:
+        cleanup_pid_file()
 
 if __name__ == "__main__":
     asyncio.run(run())

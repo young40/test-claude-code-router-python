@@ -38,6 +38,7 @@ class ProviderService:
                     provider_config.get("api_base_url"),
                     provider_config.get("api_key")
                 ]):
+                    print(f"[ERROR] Invalid provider config: {provider_config}")
                     continue
                 
                 transformer = {}

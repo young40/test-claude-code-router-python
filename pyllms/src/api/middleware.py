@@ -7,7 +7,7 @@ from ..utils.log import log
 
 
 class ApiError(Exception):
-    """API错误类"""
+    """API Error class"""
     
     def __init__(
         self, 
@@ -28,17 +28,17 @@ def create_api_error(
     code: str = "internal_error", 
     error_type: str = "api_error"
 ) -> ApiError:
-    """创建API错误"""
+    """Create an API error"""
     return ApiError(message, status_code, code, error_type)
 
 
 async def error_handler(error: Exception, request: Request) -> JSONResponse:
-    """错误处理器"""
-    # 记录错误
+    """Error handler middleware"""
+    # Log the error
     log(f"Error: {error}")
     log(traceback.format_exc())
     
-    # 确定状态码和错误信息
+    # Determine status code and error response
     if isinstance(error, ApiError):
         status_code = error.status_code
         response = {
@@ -59,12 +59,18 @@ async def error_handler(error: Exception, request: Request) -> JSONResponse:
         }
     else:
         status_code = 500
+        # Include more detailed error information for debugging
         response = {
             "error": {
-                "message": "Internal Server Error",
+                "message": f"Internal Server Error: {str(error)}",
                 "type": "api_error",
-                "code": "internal_error"
+                "code": "internal_error",
+                "details": {
+                    "error_type": error.__class__.__name__,
+                    "path": request.url.path
+                }
             }
         }
     
+    # Ensure consistent error response format with TypeScript implementation
     return JSONResponse(status_code=status_code, content=response)

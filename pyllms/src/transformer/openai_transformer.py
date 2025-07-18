@@ -184,9 +184,21 @@ class OpenAITransformer(Transformer):
         return UnifiedChatRequest(**unified_request)
     
     async def transform_response_in(self, response: httpx.Response) -> httpx.Response:
-        """转换响应输入"""
+        """
+        Transform provider response to unified response format
+        
+        This is called after all transformResponseOut methods have been applied.
+        For OpenAI, we don't need to modify the response format as it's already
+        in the format we want.
+        """
         return response
     
     async def transform_response_out(self, response: httpx.Response) -> httpx.Response:
-        """转换响应输出"""
+        """
+        Transform provider response
+        
+        This is called before transformResponseIn and should be used to modify
+        the provider's response before it's transformed to the unified format.
+        For OpenAI, we don't need to modify the response.
+        """
         return response

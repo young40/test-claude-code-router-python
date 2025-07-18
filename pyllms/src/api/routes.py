@@ -85,82 +85,111 @@ def register_api_routes(app: FastAPI) -> None:
             media_type="application/json"
         )
     
-    # 处理转换器请求的函数
+    # Process transformer request
     async def process_transformer_request(request: Request, transformer):
-        log(f"开始处理转换器请求: URL={request.url}, 转换器={transformer.name if hasattr(transformer, 'name') else '未知'}")
+        log(f"Processing transformer request: URL={request.url}, Transformer={transformer.name if hasattr(transformer, 'name') else 'unknown'}")
         try:
             body = await request.json()
-            log(f"请求体: {json.dumps(body, ensure_ascii=False)}")
+            log(f"Request body: {json.dumps(body, ensure_ascii=False)}")
             
             provider_name = getattr(request.state, "provider", None)
-            log(f"提供者名称: {provider_name}")
+            log(f"Provider name: {provider_name}")
             
             if not provider_name:
-                provider_name = "ollama"  # 默认提供者
-                log(f"使用默认提供者: {provider_name}")
+                # Get provider from request if available
+                if "provider" in body:
+                    provider_name = body["provider"]
+                    log(f"Using provider from request: {provider_name}")
+                else:
+                    # Default provider as fallback
+                    provider_name = "default"
+                    log(f"Using default provider: {provider_name}")
             
             provider = app.state._server.provider_service.get_provider(provider_name)
-            log(f"获取到提供者: {provider}")
+            log(f"Retrieved provider: {provider}")
             
             if not provider:
-                log(f"未找到提供者: {provider_name}")
+                log(f"Provider not found: {provider_name}")
                 raise create_api_error(
                     f"Provider '{provider_name}' not found",
                     404,
                     "provider_not_found"
                 )
             
+            # Initialize request body and config
             request_body = body
             config = {}
             
-            # 转换请求输出
-            log("开始转换请求输出")
+            # Transform request using transformer's transformRequestOut
+            log("Starting request transformation (transformRequestOut)")
             if hasattr(transformer, 'transform_request_out') and callable(transformer.transform_request_out):
-                log("调用 transform_request_out")
+                log("Calling transform_request_out")
                 transform_out = await transformer.transform_request_out(body)
-                if hasattr(transform_out, 'body'):
+                
+                # Handle different return types from transformRequestOut
+                if hasattr(transform_out, 'body') and transform_out.body is not None:
                     request_body = transform_out.body
                     config = transform_out.config or {}
-                    log(f"转换后的请求体: {json.dumps(request_body, ensure_ascii=False)}")
+                    log(f"Transformed request body: {json.dumps(request_body, ensure_ascii=False) if isinstance(request_body, dict) else str(request_body)}")
                 else:
                     request_body = transform_out
-                    log(f"转换后的请求体: {json.dumps(request_body, ensure_ascii=False)}")
+                    log(f"Transformed request body: {json.dumps(request_body, ensure_ascii=False) if isinstance(request_body, dict) else str(request_body)}")
             
-            # 应用提供者转换器
-            log('use transformers:', provider.get('transformer', {}).get('use', []))
+            # Apply provider transformers (transformRequestIn)
+            log('Provider transformers:', provider.get('transformer', {}).get('use', []))
             if provider.get('transformer', {}).get('use'):
                 for t in provider['transformer']['use']:
-                    if not t or not hasattr(t, 'transform_request_in'):
+                    if not t or not hasattr(t, 'transform_request_in') or not callable(t.transform_request_in):
+                        log(f"Skipping transformer without transform_request_in method")
                         continue
                     
+                    log(f"Applying provider transformer: {t.name if hasattr(t, 'name') else 'unknown'}")
                     transform_in = await t.transform_request_in(request_body, provider)
-                    if hasattr(transform_in, 'body'):
+                    
+                    # Handle different return types from transformRequestIn
+                    if hasattr(transform_in, 'body') and transform_in.body is not None:
                         request_body = transform_in.body
                         config = {**config, **(transform_in.config or {})}
                     else:
                         request_body = transform_in
             
-            # 应用模型特定转换器
-            if (provider.get('transformer', {}).get(body['model'], {}).get('use')):
-                for t in provider['transformer'][body['model']]['use']:
-                    if not t or not hasattr(t, 'transform_request_in'):
+            # Apply model-specific transformers if available
+            model_name = body.get('model')
+            if model_name and provider.get('transformer', {}).get(model_name, {}).get('use'):
+                log(f"Applying model-specific transformers for {model_name}")
+                for t in provider['transformer'][model_name]['use']:
+                    if not t or not hasattr(t, 'transform_request_in') or not callable(t.transform_request_in):
                         continue
                     
-                    request_body = await t.transform_request_in(request_body, provider)
+                    log(f"Applying model transformer: {t.name if hasattr(t, 'name') else 'unknown'}")
+                    transform_result = await t.transform_request_in(request_body, provider)
+                    
+                    # Handle different return types
+                    if hasattr(transform_result, 'body') and transform_result.body is not None:
+                        request_body = transform_result.body
+                        config = {**config, **(transform_result.config or {})}
+                    else:
+                        request_body = transform_result
             
-            # 发送请求
+            # Send request to provider
             url = config.get('url') or provider['base_url']
-            log(f"发送请求到: {url}")
-            response = await send_unified_request(url, request_body, {
+            log(f"Sending request to: {url}")
+            
+            # Prepare request configuration
+            request_config = {
                 'https_proxy': app.state._server.config_service.get_https_proxy(),
                 **config,
                 'headers': {
                     'Authorization': f"Bearer {provider['api_key']}",
                     **(config.get('headers') or {})
                 }
-            })
+            }
             
-            if not response.status_code == 200:
+            # Send the request
+            response = await send_unified_request(url, request_body, request_config)
+            
+            # Handle error responses
+            if response.status_code != 200:
                 error_text = await response.text()
                 log(f"Error response from {url}: {error_text}")
                 raise create_api_error(
@@ -169,54 +198,99 @@ def register_api_routes(app: FastAPI) -> None:
                     "provider_response_error"
                 )
             
-            # 处理响应
+            # Process response
             final_response = response
             
-            # 应用提供者转换器
+            # Apply provider transformers for response (transformResponseOut)
             if provider.get('transformer', {}).get('use'):
                 for t in provider['transformer']['use']:
-                    if not t or not hasattr(t, 'transform_response_out'):
+                    if not t or not hasattr(t, 'transform_response_out') or not callable(t.transform_response_out):
+                        log(f"Skipping transformer without transform_response_out method")
                         continue
                     
-                    final_response = await t.transform_response_out(final_response)
+                    log(f"Applying provider response transformer: {t.name if hasattr(t, 'name') else 'unknown'}")
+                    try:
+                        final_response = await t.transform_response_out(final_response)
+                    except Exception as e:
+                        log(f"Error in transform_response_out: {e}")
+                        # Continue with other transformers even if one fails
             
-            # 应用模型特定转换器
-            if (provider.get('transformer', {}).get(body['model'], {}).get('use')):
-                for t in provider['transformer'][body['model']]['use']:
-                    if not t or not hasattr(t, 'transform_response_out'):
+            # Apply model-specific transformers for response if available
+            if model_name and provider.get('transformer', {}).get(model_name, {}).get('use'):
+                for t in provider['transformer'][model_name]['use']:
+                    if not t or not hasattr(t, 'transform_response_out') or not callable(t.transform_response_out):
                         continue
                     
-                    final_response = await t.transform_response_out(final_response)
+                    log(f"Applying model response transformer: {t.name if hasattr(t, 'name') else 'unknown'}")
+                    try:
+                        final_response = await t.transform_response_out(final_response)
+                    except Exception as e:
+                        log(f"Error in model-specific transform_response_out: {e}")
+                        # Continue with other transformers even if one fails
             
-            # 应用转换器响应输入
-            if hasattr(transformer, 'transform_response_in'):
-                final_response = await transformer.transform_response_in(final_response)
+            # Apply transformer's transformResponseIn
+            if hasattr(transformer, 'transform_response_in') and callable(transformer.transform_response_in):
+                log(f"Applying transformer response_in: {transformer.name if hasattr(transformer, 'name') else 'unknown'}")
+                try:
+                    final_response = await transformer.transform_response_in(final_response)
+                except Exception as e:
+                    log(f"Error in transform_response_in: {e}")
+                    # If the final transformer fails, we still need to return something
             
-            # 返回响应
-            if not final_response.status_code == 200:
+            # Return appropriate response based on status code
+            if final_response.status_code != 200:
                 return Response(
                     content=await final_response.read(),
                     status_code=final_response.status_code,
                     headers=dict(final_response.headers)
                 )
             
+            # Handle streaming vs. non-streaming responses
             is_stream = body.get('stream', False)
             if is_stream:
+                # For streaming responses, we need to ensure proper SSE format
+                # This matches the TypeScript implementation which returns the response body directly
+                log("Returning streaming response")
                 return StreamingResponse(
-                    final_response.iter_bytes(),
+                    final_response.aiter_bytes(),  # Use aiter_bytes for async iteration
                     media_type="text/event-stream",
                     headers={
+                        "Content-Type": "text/event-stream",
                         "Cache-Control": "no-cache",
                         "Connection": "keep-alive"
                     }
                 )
             else:
-                return Response(
-                    content=await final_response.read(),
-                    media_type="application/json"
-                )
+                # For regular responses, return the JSON content
+                # This matches the TypeScript implementation which returns the JSON response
+                try:
+                    # Read the response content
+                    response_content = await final_response.read()
+                    
+                    # Try to parse as JSON to validate it (but don't modify the content)
+                    try:
+                        json.loads(response_content)
+                        log("Returning valid JSON response")
+                    except json.JSONDecodeError:
+                        log("Response is not valid JSON, returning as raw content")
+                    
+                    # Return the original content regardless of JSON validity
+                    # This ensures we don't modify the response content
+                    return Response(
+                        content=response_content,
+                        media_type=final_response.headers.get("content-type", "application/json"),
+                        status_code=final_response.status_code
+                    )
+                except Exception as e:
+                    log(f"Error processing response: {e}")
+                    # If there's an error reading the response, return an error
+                    raise create_api_error(
+                        f"Error processing provider response: {str(e)}",
+                        500,
+                        "response_processing_error"
+                    )
         except Exception as e:
-            log(f"处理请求时出错: {e}")
+            log(f"Error processing request: {e}")
             return Response(
                 content=f'{{"error": "Error processing request: {str(e)}"}}',
                 status_code=500,

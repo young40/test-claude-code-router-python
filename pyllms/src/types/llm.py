@@ -71,7 +71,7 @@ class ToolParameters(TypedDict, total=False):
     properties: Dict[str, Any]
     required: List[str]
     additionalProperties: bool
-    $schema: str
+    schema: str  # Changed from $schema to schema
 
 
 class ToolFunction(TypedDict):

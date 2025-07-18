@@ -146,7 +146,45 @@ async def run(options: Optional[Dict[str, Any]] = None):
         auth_middleware = api_key_auth(config)
         await auth_middleware(req, reply)
     
-    # 添加中间件，注意顺序很重要：先认证，再路由
+    # 创建一个新的日志记录中间件，用于验证回调是否被调用
+    async def log_callback_adapter(req, reply):
+        print("=" * 50)
+        print("LOG: 新的 pre_handler 回调被调用!")
+        print(f"LOG: [{ __import__('datetime').datetime.now().isoformat() }] 请求路径: {req.url.path}")
+        print(f"LOG: 请求方法: {req.method}")
+        
+        # 提取请求头中的授权信息
+        auth_header = req.headers.get("authorization", "")
+        if auth_header and auth_header.startswith("Bearer "):
+            api_key = auth_header.split("Bearer ")[1].strip()
+            # 打印可直接复制到终端的环境变量设置命令
+            print("\n# 复制以下命令到终端设置环境变量:")
+            print(f"export OPENAI_API_KEY='{api_key}'")
+            print(f"export ANTHROPIC_API_KEY='{api_key}'")
+            print(f"export CLAUDE_API_KEY='{api_key}'")
+            print("# 或者在 Windows PowerShell 中使用:")
+            print(f"$env:OPENAI_API_KEY='{api_key}'")
+            print(f"$env:ANTHROPIC_API_KEY='{api_key}'")
+            print(f"$env:CLAUDE_API_KEY='{api_key}'")
+            print("# 或者在 Windows CMD 中使用:")
+            print(f"set OPENAI_API_KEY={api_key}")
+            print(f"set ANTHROPIC_API_KEY={api_key}")
+            print(f"set CLAUDE_API_KEY={api_key}")
+        
+        # 打印所有请求头，可能包含其他有用信息
+        print("\n# 所有请求头:")
+        for key, value in req.headers.items():
+            print(f"# {key}: {value}")
+        
+        print("=" * 50)
+        
+        # 如果需要，可以修改请求或响应
+        # 例如，添加一个自定义头部
+        if reply and hasattr(reply, "headers"):
+            reply.headers["X-Custom-Header"] = "pre_handler_called"
+    
+    # 添加中间件，注意顺序很重要：先日志记录，再认证，最后路由
+    server.add_hook("pre_handler", log_callback_adapter)
     server.add_hook("pre_handler", auth_adapter)
     server.add_hook("pre_handler", router_adapter)
     

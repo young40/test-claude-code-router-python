@@ -52,16 +52,13 @@ async def run(options: Optional[Dict[str, Any]] = None):
     
     await initialize_claude_config()
     await init_dir()
-    # Use silent mode if running in background
-    silent_mode = options.get("silent", False)
-    config = await init_config(silent=silent_mode)
+    config = await init_config()
     
     host = config.get("HOST", "127.0.0.1")
     
     if config.get("HOST") and not config.get("APIKEY"):
         host = "127.0.0.1"
-        if not silent_mode:
-            print("⚠️ API key is not set. HOST is forced to 127.0.0.1.")
+        print("⚠️ API key is not set. HOST is forced to 127.0.0.1.")
     
     port = options.get("port", 3456)
     

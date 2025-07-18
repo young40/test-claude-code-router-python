@@ -9,21 +9,21 @@ from .log import log
 
 async def send_unified_request(
     url: Union[str, httpx.URL],
-    request: UnifiedChatRequest,
+    request: Union[UnifiedChatRequest, Dict[str, Any]],
     config: Dict[str, Any]
 ) -> httpx.Response:
     """
-    发送统一请求到LLM提供者
+    Send unified request to LLM provider
     
-    参数:
-        url: 请求URL
-        request: 请求数据
-        config: 配置选项
+    Args:
+        url: Request URL
+        request: Request data (either UnifiedChatRequest object or dictionary)
+        config: Configuration options
     
-    返回:
-        httpx.Response: HTTP响应
+    Returns:
+        httpx.Response: HTTP response
     """
-    # 设置请求头
+    # Set request headers
     headers = {
         "Content-Type": "application/json",
     }
@@ -31,33 +31,58 @@ async def send_unified_request(
     if config.get("headers"):
         headers.update(config["headers"])
     
-    # 设置超时
+    # Set timeout
     timeout = httpx.Timeout(config.get("TIMEOUT", 60 * 60), connect=30.0)
     
-    # 准备请求选项
+    # Prepare request options
     request_options = {
         "headers": headers,
         "timeout": timeout,
         "follow_redirects": True
     }
     
-    # 添加代理
+    # Add proxy if configured
     if config.get("https_proxy"):
         request_options["proxies"] = {
             "http://": config["https_proxy"],
             "https://": config["https_proxy"]
         }
     
-    # 序列化请求体
+    # Check if this is a streaming request
+    is_stream = False
+    if isinstance(request, dict) and request.get("stream") is True:
+        is_stream = True
+    elif hasattr(request, "stream") and request.stream is True:
+        is_stream = True
+    
+    # Serialize request body based on type
     if isinstance(request, dict):
         body = json.dumps(request)
-    else:
+    elif hasattr(request, 'to_dict') and callable(request.to_dict):
+        # Use the to_dict method if available (preferred for UnifiedChatRequest)
+        body = json.dumps(request.to_dict())
+    elif hasattr(request, '__dict__'):
+        # Fallback to __dict__ for other objects
         body = json.dumps(request.__dict__)
+    elif hasattr(request, 'to_json') and callable(request.to_json):
+        # Support to_json method if available
+        body = request.to_json()
+    else:
+        # Last resort, try direct serialization
+        body = json.dumps(request)
     
-    # 记录请求信息
-    log("final request:", str(url), config.get("https_proxy"), request_options)
+    # Log request information
+    log("Final request:", str(url), config.get("https_proxy"), {
+        "headers": headers,
+        "body_length": len(body) if body else 0,
+        "is_stream": is_stream
+    })
     
-    # 发送请求
+    # Send request
     async with httpx.AsyncClient(**request_options) as client:
-        response = await client.post(url, content=body)
+        if is_stream:
+            # For streaming requests, we need to use stream=True to get a proper streaming response
+            response = await client.post(url, content=body, stream=True)
+        else:
+            response = await client.post(url, content=body)
         return response

@@ -1,9 +1,10 @@
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, AsyncIterable
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, Body
 from fastapi.responses import JSONResponse, StreamingResponse
 import httpx
 from datetime import datetime
 import json
+import asyncio
 
 from ..types.llm import UnifiedChatRequest, RegisterProviderRequest, LLMProvider
 from ..utils.request import send_unified_request
@@ -251,8 +252,11 @@ def register_api_routes(app: FastAPI) -> None:
                 # For streaming responses, we need to ensure proper SSE format
                 # This matches the TypeScript implementation which returns the response body directly
                 log("Returning streaming response")
+                
+                # Create a streaming response that properly forwards the stream
                 return StreamingResponse(
-                    final_response.aiter_bytes(),  # Use aiter_bytes for async iteration
+                    content=final_response.aiter_bytes(),
+                    status_code=final_response.status_code,
                     media_type="text/event-stream",
                     headers={
                         "Content-Type": "text/event-stream",

@@ -1,6 +1,7 @@
 import json
 from typing import Dict, Any, Optional
 import httpx
+from fastapi.responses import StreamingResponse
 
 from ..types.transformer import Transformer, TransformerOptions
 from ..types.llm import UnifiedChatRequest
@@ -93,17 +94,19 @@ Examples:
             if not hasattr(response, 'aiter_bytes'):
                 return response
             
-            exit_tool_index = -1
-            exit_tool_response = ""
-            
-            async def stream_generator():
-                nonlocal exit_tool_index, exit_tool_response
+            # Create a new streaming response that processes the stream on-the-fly
+            async def process_stream():
+                exit_tool_index = -1
+                exit_tool_response = ""
                 
                 async for chunk in response.aiter_bytes():
                     chunk_str = chunk.decode('utf-8')
                     lines = chunk_str.split('\n')
                     
                     for line in lines:
+                        if not line.strip():
+                            continue
+                            
                         if line.startswith("data: ") and line.strip() != "data: [DONE]":
                             try:
                                 data = json.loads(line[6:])
@@ -122,16 +125,19 @@ Examples:
                                         
                                         exit_tool_response += tool_call["function"]["arguments"]
                                         try:
-                                            response_data = json.loads(exit_tool_response)
-                                            data["choices"] = [{
-                                                "delta": {
-                                                    "role": "assistant",
-                                                    "content": response_data.get("response", "")
-                                                }
-                                            }]
-                                            modified_line = f"data: {json.dumps(data)}\n\n"
-                                            yield modified_line.encode('utf-8')
+                                            # Try to parse the complete response if we have enough data
+                                            if exit_tool_response.endswith("}"):
+                                                response_data = json.loads(exit_tool_response)
+                                                data["choices"] = [{
+                                                    "delta": {
+                                                        "role": "assistant",
+                                                        "content": response_data.get("response", "")
+                                                    }
+                                                }]
+                                                modified_line = f"data: {json.dumps(data)}\n\n"
+                                                yield modified_line.encode('utf-8')
                                         except json.JSONDecodeError:
+                                            # If we can't parse yet, continue collecting
                                             pass
                                         continue
                                 
@@ -144,18 +150,23 @@ Examples:
                             except json.JSONDecodeError:
                                 # JSON解析失败，传递原始行
                                 yield (line + "\n").encode('utf-8')
+                        elif line.strip() == "data: [DONE]":
+                            # Pass through the DONE marker
+                            yield (line + "\n\n").encode('utf-8')
                         else:
                             # 传递非数据行
                             yield (line + "\n").encode('utf-8')
             
-            return httpx.Response(
+            # Return a streaming response that will process chunks as they arrive
+            return StreamingResponse(
+                content=process_stream(),
                 status_code=response.status_code,
+                media_type="text/event-stream",
                 headers={
-                    "Content-Type": content_type,
+                    "Content-Type": "text/event-stream",
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive"
-                },
-                content=b''.join([chunk async for chunk in stream_generator()])
+                }
             )
         
         return response

@@ -79,36 +79,6 @@ async def run(options: Optional[Dict[str, Any]] = None):
     # Use port from environment variable if set (for background process)
     service_port = int(os.environ.get("SERVICE_PORT", port))
     
-    # 创建一个独立的 FastAPI 应用程序，用于调试
-    debug_app = FastAPI()
-    
-    @debug_app.post("/v1/messages")
-    async def handle_messages(request: Request):
-        print(f"收到 /v1/messages 请求: {request.url}")
-        print(f"查询参数: {request.query_params}")
-        try:
-            body = await request.json()
-            print(f"请求体: {json.dumps(body, ensure_ascii=False)}")
-        except:
-            print("无法解析请求体")
-        
-        # 返回一个简单的响应
-        return JSONResponse(content={"message": "这是一个测试响应"})
-    
-    @debug_app.post("/v1/messages{path:path}")
-    async def handle_messages_with_path(request: Request, path: str):
-        print(f"收到 /v1/messages{path} 请求: {request.url}")
-        print(f"路径参数: {path}")
-        print(f"查询参数: {request.query_params}")
-        try:
-            body = await request.json()
-            print(f"请求体: {json.dumps(body, ensure_ascii=False)}")
-        except:
-            print("无法解析请求体")
-        
-        # 返回一个简单的响应
-        return JSONResponse(content={"message": "这是一个测试响应"})
-    
     # 创建原始服务器
     server = create_server({
         "json_path": str(CONFIG_FILE),
@@ -117,7 +87,6 @@ async def run(options: Optional[Dict[str, Any]] = None):
             "HOST": host,
             "PORT": service_port,
             "LOG_FILE": str(Path.home() / ".claude-code-router" / "claude-code-router.log"),
-            "debug_app": debug_app,  # 传递调试应用程序
         },
     })
     

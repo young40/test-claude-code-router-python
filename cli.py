@@ -62,7 +62,9 @@ async def main():
     command = sys.argv[1] if len(sys.argv) > 1 else None
     
     if command == "start":
-        await run()
+        # Check if --silent flag is provided
+        silent_mode = "--silent" in sys.argv
+        await run({"silent": silent_mode})
     
     elif command == "stop":
         try:
@@ -92,9 +94,9 @@ async def main():
             cli_path = Path(__file__).resolve()
             
             try:
-                # Start service in background
+                # Start service in background with silent mode
                 process = subprocess.Popen(
-                    [sys.executable, str(cli_path), "start"],
+                    [sys.executable, str(cli_path), "start", "--silent"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True

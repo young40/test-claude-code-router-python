@@ -6,8 +6,16 @@ def create_server(config: Any) -> Server:
     """
     Create and return a Server instance, similar to ccr/src/server.ts
     Args:
-        config: Server configuration
+        config: Server configuration (dict)
     Returns:
         Server: The server instance
     """
-    return Server(config)
+    options = ConfigOptions(
+        initial_config=config.get("initial_config"),
+        json_path=config.get("json_path"),
+        use_json_file="json_path" in config,
+        env_path=config.get("env_path"),
+        use_env_file="env_path" in config,
+        use_environment_variables=True
+    )
+    return Server(options)

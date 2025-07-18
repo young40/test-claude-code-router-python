@@ -1,14 +1,18 @@
-from typing import Dict, List, Optional, Any, Union, Type
+import time
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from ..types.llm import LLMProvider, RegisterProviderRequest, ModelRoute, RequestRouteInfo, ConfigProvider
+from ..types.llm import (
+    LLMProvider, RegisterProviderRequest, ModelRoute, 
+    RequestRouteInfo, ConfigProvider
+)
 from ..utils.log import log
 from .config import ConfigService
 from .transformer import TransformerService
 
 
 class ProviderService:
-    """提供者服务类，负责管理LLM提供者和模型路由"""
+    """提供者服务类"""
     
     def __init__(self, config_service: ConfigService, transformer_service: TransformerService):
         self.config_service = config_service
@@ -16,79 +20,91 @@ class ProviderService:
         self.providers: Dict[str, LLMProvider] = {}
         self.model_routes: Dict[str, ModelRoute] = {}
         
-        self.initialize_custom_providers()
+        self._initialize_custom_providers()
     
-    def initialize_custom_providers(self):
+    def _initialize_custom_providers(self) -> None:
         """初始化自定义提供者"""
         providers_config = self.config_service.get("providers")
         if providers_config and isinstance(providers_config, list):
-            self.initialize_from_providers_array(providers_config)
+            self._initialize_from_providers_array(providers_config)
     
-    def initialize_from_providers_array(self, providers_config: List[ConfigProvider]):
+    def _initialize_from_providers_array(self, providers_config: List[Dict[str, Any]]) -> None:
         """从提供者配置数组初始化"""
         for provider_config in providers_config:
             try:
-                if not (provider_config.get("name") and 
-                        provider_config.get("api_base_url") and 
-                        provider_config.get("api_key")):
+                if not all([
+                    provider_config.get("name"),
+                    provider_config.get("api_base_url"),
+                    provider_config.get("api_key")
+                ]):
                     continue
                 
                 transformer = {}
                 
                 if provider_config.get("transformer"):
-                    for key, value in provider_config["transformer"].items():
+                    transformer_config = provider_config["transformer"]
+                    
+                    for key, value in transformer_config.items():
                         if key == "use":
                             if isinstance(value, list):
                                 transformer["use"] = []
-                                for t in value:
-                                    if isinstance(t, list) and isinstance(t[0], str):
-                                        constructor = self.transformer_service.get_transformer(t[0])
-                                        if constructor:
-                                            transformer["use"].append(constructor(t[1]))
-                                    elif isinstance(t, str):
-                                        t_instance = self.transformer_service.get_transformer(t)
-                                        if t_instance:
-                                            transformer["use"].append(t_instance)
+                                for transformer_item in value:
+                                    if isinstance(transformer_item, list) and len(transformer_item) >= 1:
+                                        transformer_class = self.transformer_service.get_transformer(transformer_item[0])
+                                        if transformer_class:
+                                            options = transformer_item[1] if len(transformer_item) > 1 else None
+                                            transformer["use"].append(transformer_class(options))
+                                    elif isinstance(transformer_item, str):
+                                        transformer_class = self.transformer_service.get_transformer(transformer_item)
+                                        if transformer_class:
+                                            transformer["use"].append(transformer_class())
                         else:
-                            if isinstance(provider_config["transformer"].get(key, {}).get("use"), list):
-                                transformer[key] = {
-                                    "use": []
-                                }
-                                for t in provider_config["transformer"][key]["use"]:
-                                    if isinstance(t, list) and isinstance(t[0], str):
-                                        constructor = self.transformer_service.get_transformer(t[0])
-                                        if constructor:
-                                            transformer[key]["use"].append(constructor(t[1]))
-                                    elif isinstance(t, str):
-                                        t_instance = self.transformer_service.get_transformer(t)
-                                        if t_instance:
-                                            transformer[key]["use"].append(t_instance)
+                            if isinstance(value, dict) and isinstance(value.get("use"), list):
+                                transformer[key] = {"use": []}
+                                for transformer_item in value["use"]:
+                                    if isinstance(transformer_item, list) and len(transformer_item) >= 1:
+                                        transformer_class = self.transformer_service.get_transformer(transformer_item[0])
+                                        if transformer_class:
+                                            options = transformer_item[1] if len(transformer_item) > 1 else None
+                                            transformer[key]["use"].append(transformer_class(options))
+                                    elif isinstance(transformer_item, str):
+                                        transformer_class = self.transformer_service.get_transformer(transformer_item)
+                                        if transformer_class:
+                                            transformer[key]["use"].append(transformer_class())
                 
-                self.register_provider({
-                    "name": provider_config["name"],
-                    "base_url": provider_config["api_base_url"],
-                    "api_key": provider_config["api_key"],
-                    "models": provider_config.get("models", []),
-                    "transformer": transformer if provider_config.get("transformer") else None
-                })
+                self.register_provider(RegisterProviderRequest(
+                    name=provider_config["name"],
+                    base_url=provider_config["api_base_url"],
+                    api_key=provider_config["api_key"],
+                    models=provider_config.get("models", []),
+                    transformer=transformer if transformer else None
+                ))
                 
                 log(f"{provider_config['name']} provider registered")
+                
             except Exception as error:
-                log(f"{provider_config['name']} provider registered error: {error}")
+                log(f"{provider_config.get('name', 'Unknown')} provider registered error: {error}")
     
     def register_provider(self, request: RegisterProviderRequest) -> LLMProvider:
         """注册提供者"""
-        provider = {**request}
+        provider = LLMProvider(
+            name=request.name,
+            base_url=request.base_url,
+            api_key=request.api_key,
+            models=request.models,
+            transformer=request.transformer
+        )
         
-        self.providers[provider["name"]] = provider
+        self.providers[provider.name] = provider
         
-        for model in request["models"]:
-            full_model = f"{provider['name']},{model}"
-            route = {
-                "provider": provider["name"],
-                "model": model,
-                "full_model": full_model
-            }
+        # 注册模型路由
+        for model in request.models:
+            full_model = f"{provider.name},{model}"
+            route = ModelRoute(
+                provider=provider.name,
+                model=model,
+                full_model=full_model
+            )
             self.model_routes[full_model] = route
             if model not in self.model_routes:
                 self.model_routes[model] = route
@@ -100,62 +116,64 @@ class ProviderService:
         return list(self.providers.values())
     
     def get_provider(self, name: str) -> Optional[LLMProvider]:
-        """获取指定名称的提供者"""
+        """获取指定提供者"""
         return self.providers.get(name)
     
-    def update_provider(self, id: str, updates: Dict[str, Any]) -> Optional[LLMProvider]:
+    def update_provider(
+        self, 
+        provider_id: str, 
+        updates: Dict[str, Any]
+    ) -> Optional[LLMProvider]:
         """更新提供者"""
-        provider = self.providers.get(id)
+        provider = self.providers.get(provider_id)
         if not provider:
             return None
         
-        updated_provider = {
-            **provider,
-            **updates,
-            "updated_at": datetime.now()
-        }
+        # 更新提供者信息
+        for key, value in updates.items():
+            if hasattr(provider, key):
+                setattr(provider, key, value)
         
-        self.providers[id] = updated_provider
+        self.providers[provider_id] = provider
         
+        # 如果更新了模型列表，需要重新注册路由
         if "models" in updates:
-            # 删除旧模型路由
-            for model in provider["models"]:
-                full_model = f"{provider['name']},{model}"
-                if full_model in self.model_routes:
-                    del self.model_routes[full_model]
-                if model in self.model_routes and self.model_routes[model]["provider"] == provider["name"]:
-                    del self.model_routes[model]
+            # 删除旧路由
+            old_models = getattr(provider, 'models', [])
+            for model in old_models:
+                full_model = f"{provider.name},{model}"
+                self.model_routes.pop(full_model, None)
+                if self.model_routes.get(model) and self.model_routes[model].provider == provider.name:
+                    self.model_routes.pop(model, None)
             
-            # 添加新模型路由
+            # 添加新路由
             for model in updates["models"]:
-                full_model = f"{provider['name']},{model}"
-                route = {
-                    "provider": provider["name"],
-                    "model": model,
-                    "full_model": full_model
-                }
+                full_model = f"{provider.name},{model}"
+                route = ModelRoute(
+                    provider=provider.name,
+                    model=model,
+                    full_model=full_model
+                )
                 self.model_routes[full_model] = route
                 if model not in self.model_routes:
                     self.model_routes[model] = route
         
-        return updated_provider
+        return provider
     
-    def delete_provider(self, id: str) -> bool:
+    def delete_provider(self, provider_id: str) -> bool:
         """删除提供者"""
-        provider = self.providers.get(id)
+        provider = self.providers.get(provider_id)
         if not provider:
             return False
         
-        # 删除相关模型路由
-        for model in provider["models"]:
-            full_model = f"{provider['name']},{model}"
-            if full_model in self.model_routes:
-                del self.model_routes[full_model]
-            if model in self.model_routes and self.model_routes[model]["provider"] == provider["name"]:
-                del self.model_routes[model]
+        # 删除相关路由
+        for model in provider.models:
+            full_model = f"{provider.name},{model}"
+            self.model_routes.pop(full_model, None)
+            if self.model_routes.get(model) and self.model_routes[model].provider == provider.name:
+                self.model_routes.pop(model, None)
         
-        # 删除提供者
-        del self.providers[id]
+        del self.providers[provider_id]
         return True
     
     def toggle_provider(self, name: str, enabled: bool) -> bool:
@@ -163,6 +181,7 @@ class ProviderService:
         provider = self.providers.get(name)
         if not provider:
             return False
+        # 这里可以添加启用/禁用逻辑
         return True
     
     def resolve_model_route(self, model_name: str) -> Optional[RequestRouteInfo]:
@@ -171,64 +190,47 @@ class ProviderService:
         if not route:
             return None
         
-        provider = self.providers.get(route["provider"])
+        provider = self.providers.get(route.provider)
         if not provider:
             return None
         
-        return {
-            "provider": provider,
-            "original_model": model_name,
-            "target_model": route["model"]
-        }
+        return RequestRouteInfo(
+            provider=provider,
+            original_model=model_name,
+            target_model=route.model
+        )
     
     def get_available_model_names(self) -> List[str]:
-        """获取可用模型名称列表"""
+        """获取可用模型名称"""
         model_names = []
         for provider in self.providers.values():
-            for model in provider["models"]:
+            for model in provider.models:
                 model_names.append(model)
-                model_names.append(f"{provider['name']},{model}")
+                model_names.append(f"{provider.name},{model}")
         return model_names
     
     def get_model_routes(self) -> List[ModelRoute]:
-        """获取模型路由列表"""
+        """获取模型路由"""
         return list(self.model_routes.values())
-    
-    def parse_transformer_config(self, transformer_config: Any) -> Dict[str, Any]:
-        """解析转换器配置"""
-        if not transformer_config:
-            return {}
-        
-        if isinstance(transformer_config, list):
-            result = {}
-            for item in transformer_config:
-                if isinstance(item, list):
-                    name, config = item[0], item[1] if len(item) > 1 else {}
-                    result[name] = config
-                else:
-                    result[item] = {}
-            return result
-        
-        return transformer_config
     
     async def get_available_models(self) -> Dict[str, Any]:
         """获取可用模型"""
         models = []
         
         for provider in self.providers.values():
-            for model in provider["models"]:
+            for model in provider.models:
                 models.append({
                     "id": model,
                     "object": "model",
-                    "owned_by": provider["name"],
-                    "provider": provider["name"]
+                    "owned_by": provider.name,
+                    "provider": provider.name
                 })
                 
                 models.append({
-                    "id": f"{provider['name']},{model}",
-                    "object": "model",
-                    "owned_by": provider["name"],
-                    "provider": provider["name"]
+                    "id": f"{provider.name},{model}",
+                    "object": "model", 
+                    "owned_by": provider.name,
+                    "provider": provider.name
                 })
         
         return {

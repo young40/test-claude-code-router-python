@@ -1,12 +1,19 @@
 from .anthropic_transformer import AnthropicTransformer
+from .gemini_transformer import GeminiTransformer
+from .deepseek_transformer import DeepseekTransformer
+from .tooluse_transformer import TooluseTransformer
+from .openrouter_transformer import OpenrouterTransformer
+from .maxtoken_transformer import MaxTokenTransformer
+from .groq_transformer import GroqTransformer
 from .openai_transformer import OpenAITransformer
 
-# 导出所有转换器
-transformers = {
-    "AnthropicTransformer": AnthropicTransformer,
-    "OpenAITransformer": OpenAITransformer,
-}
-
-def get_default_transformers():
-    """获取默认转换器列表"""
-    return list(transformers.values())
+__all__ = [
+    "AnthropicTransformer",
+    "GeminiTransformer", 
+    "DeepseekTransformer",
+    "TooluseTransformer",
+    "OpenrouterTransformer",
+    "MaxTokenTransformer",
+    "GroqTransformer",
+    "OpenAITransformer"
+]

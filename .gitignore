@@ -1,5 +1,6 @@
-# Ignore llms directory
+# Ignore llms and ccr directories
 llms/
+ccr/
 
 # Python
 __pycache__/

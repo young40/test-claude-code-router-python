@@ -141,9 +141,10 @@ def register_api_routes(app: FastAPI) -> None:
                     log(f"Transformed request body: {json.dumps(request_body, ensure_ascii=False) if isinstance(request_body, dict) else str(request_body)}")
             
             # Apply provider transformers (transformRequestIn)
-            log('Provider transformers:', provider.get('transformer', {}).get('use', []))
-            if provider.get('transformer', {}).get('use'):
-                for t in provider['transformer']['use']:
+            transformer_dict = getattr(provider, 'transformer', {}) or {}
+            log('Provider transformers:', transformer_dict.get('use', []))
+            if transformer_dict.get('use'):
+                for t in transformer_dict['use']:
                     if not t or not hasattr(t, 'transform_request_in') or not callable(t.transform_request_in):
                         log(f"Skipping transformer without transform_request_in method")
                         continue
@@ -160,9 +161,9 @@ def register_api_routes(app: FastAPI) -> None:
             
             # Apply model-specific transformers if available
             model_name = body.get('model')
-            if model_name and provider.get('transformer', {}).get(model_name, {}).get('use'):
-                log(f"Applying model-specific transformers for {model_name}")
-                for t in provider['transformer'][model_name]['use']:
+            model_transformers = transformer_dict.get(model_name, {}).get('use', []) if model_name else []
+            if model_name and model_transformers:
+                for t in model_transformers:
                     if not t or not hasattr(t, 'transform_request_in') or not callable(t.transform_request_in):
                         continue
                     
@@ -177,7 +178,7 @@ def register_api_routes(app: FastAPI) -> None:
                         request_body = transform_result
             
             # Send request to provider
-            url = config.get('url') or provider['base_url']
+            url = config.get('url') or provider.base_url
             log(f"Sending request to: {url}")
             
             # Prepare request configuration
@@ -185,7 +186,7 @@ def register_api_routes(app: FastAPI) -> None:
                 'https_proxy': app.state._server.config_service.get_https_proxy(),
                 **config,
                 'headers': {
-                    'Authorization': f"Bearer {provider['api_key']}",
+                    'Authorization': f"Bearer {provider.api_key}",
                     **(config.get('headers') or {})
                 }
             }

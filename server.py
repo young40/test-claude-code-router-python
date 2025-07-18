@@ -37,24 +37,18 @@ class ServerAdapter:
         """启动服务器"""
         if hasattr(self.server, "start"):
             if callable(self.server.start):
-                # 创建一个新的事件循环来运行服务器
-                import asyncio
-                import threading
-                
-                def run_server():
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        loop.run_until_complete(self.server.start())
-                    except Exception as e:
-                        print(f"Error in server thread: {e}")
-                    finally:
-                        loop.close()
-                
-                # 在新线程中启动服务器
-                server_thread = threading.Thread(target=run_server)
-                server_thread.daemon = True
-                server_thread.start()
+                # 直接在当前线程中启动服务器
+                try:
+                    print("✅ Server started on {}:{}".format(
+                        self.server.config_service.get("HOST", "127.0.0.1"),
+                        self.server.config_service.get("PORT", "3000")
+                    ))
+                    print("Press Ctrl+C to stop the server")
+                    await self.server.start()
+                except KeyboardInterrupt:
+                    print("\nServer stopped by user")
+                except Exception as e:
+                    print(f"Error starting server: {e}")
             else:
                 print("Server.start is not callable")
         else:

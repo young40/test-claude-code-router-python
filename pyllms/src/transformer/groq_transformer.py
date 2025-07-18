@@ -9,7 +9,7 @@ from ..utils.log import log
 
 
 class GroqTransformer(Transformer):
-    """Groq转换器"""
+    """Groq transformer"""
     
     def __init__(self, options: Optional[TransformerOptions] = None):
         super().__init__(options)
@@ -20,9 +20,9 @@ class GroqTransformer(Transformer):
         request: UnifiedChatRequest, 
         provider=None
     ) -> UnifiedChatRequest:
-        """转换请求输入，清理缓存控制字段"""
+        """Transform request input, clean cache control fields and schema references"""
         
-        # 清理消息中的缓存控制字段
+        # Clean cache control fields in messages
         for msg in request.messages:
             if isinstance(msg.content, list):
                 for item in msg.content:
@@ -31,7 +31,7 @@ class GroqTransformer(Transformer):
             elif hasattr(msg, 'cache_control'):
                 delattr(msg, 'cache_control')
         
-        # 清理工具中的$schema字段
+        # Clean $schema fields in tools
         if hasattr(request, 'tools') and request.tools:
             for tool in request.tools:
                 if hasattr(tool, 'function') and hasattr(tool.function, 'parameters'):
@@ -41,11 +41,11 @@ class GroqTransformer(Transformer):
         return request
     
     async def transform_response_out(self, response: httpx.Response) -> httpx.Response:
-        """转换响应输出，处理流式响应中的工具调用"""
+        """Transform response output, handle streaming responses with tool calls"""
         content_type = response.headers.get("Content-Type", "")
         
         if "application/json" in content_type:
-            # 处理非流式响应
+            # Handle non-streaming response
             json_response = await response.json()
             return httpx.Response(
                 status_code=response.status_code,
@@ -53,14 +53,14 @@ class GroqTransformer(Transformer):
                 json=json_response
             )
         elif "stream" in content_type:
-            # 处理流式响应
+            # Handle streaming response
             if not hasattr(response, 'aiter_bytes'):
                 return response
             
             has_text_content = False
             reasoning_content = ""
             is_reasoning_complete = False
-            buffer = ""  # 用于缓冲不完整的数据
+            buffer = ""  # Buffer for incomplete data
             
             async def stream_generator():
                 nonlocal has_text_content, reasoning_content, is_reasoning_complete, buffer
@@ -76,30 +76,32 @@ class GroqTransformer(Transformer):
                             if data.get("error"):
                                 raise Exception(json.dumps(data))
                             
-                            # 检查是否有文本内容
+                            # Check if there's text content
                             if (data.get("choices", [{}])[0].get("delta", {}).get("content") and 
                                 not has_text_content):
                                 has_text_content = True
                             
-                            # 处理工具调用，为每个工具调用生成UUID
+                            # Handle tool calls, generate UUID for each tool call
                             if data.get("choices", [{}])[0].get("delta", {}).get("tool_calls"):
                                 for tool in data["choices"][0]["delta"]["tool_calls"]:
                                     tool["id"] = f"call_{str(uuid.uuid4())}"
                             
-                            # 如果有工具调用且已有文本内容，调整索引
+                            # If there are tool calls and text content, adjust index
                             if (data.get("choices", [{}])[0].get("delta", {}).get("tool_calls") and 
                                 has_text_content):
-                                current_index = data["choices"][0].get("index", 0)
-                                data["choices"][0]["index"] = current_index + 1
+                                if isinstance(data["choices"][0].get("index"), int):
+                                    data["choices"][0]["index"] += 1
+                                else:
+                                    data["choices"][0]["index"] = 1
                             
                             modified_line = f"data: {json.dumps(data)}\n\n"
                             return modified_line.encode('utf-8')
                             
                         except json.JSONDecodeError:
-                            # JSON解析失败，传递原始行
+                            # JSON parsing failed, pass through original line
                             return (line + "\n").encode('utf-8')
                     else:
-                        # 传递非数据行
+                        # Pass through non-data lines
                         return (line + "\n").encode('utf-8')
                 
                 async for chunk in response.aiter_bytes():
@@ -117,8 +119,8 @@ class GroqTransformer(Transformer):
                     
                     buffer += chunk_str
                     
-                    # 防止缓冲区过大
-                    if len(buffer) > 1000000:  # 1MB限制
+                    # Prevent buffer from getting too large
+                    if len(buffer) > 1000000:  # 1MB limit
                         log("Buffer size exceeds limit, processing partial data")
                         lines = buffer.split("\n")
                         buffer = lines.pop() or ""
@@ -132,9 +134,9 @@ class GroqTransformer(Transformer):
                                     yield (line + "\n").encode('utf-8')
                         continue
                     
-                    # 处理缓冲区中完整的数据行
+                    # Process complete data lines in buffer
                     lines = buffer.split("\n")
-                    buffer = lines.pop() or ""  # 最后一行可能不完整
+                    buffer = lines.pop() or ""  # Last line may be incomplete
                     
                     for line in lines:
                         if not line.strip():
@@ -146,7 +148,7 @@ class GroqTransformer(Transformer):
                             log(f"Error processing line: {line}, error: {e}")
                             yield (line + "\n").encode('utf-8')
                 
-                # 处理缓冲区中剩余的数据
+                # Process remaining data in buffer
                 if buffer.strip():
                     try:
                         yield process_line(buffer.strip())
@@ -157,11 +159,11 @@ class GroqTransformer(Transformer):
             return httpx.Response(
                 status_code=response.status_code,
                 headers={
-                    "Content-Type": content_type,
+                    "Content-Type": "text/event-stream",
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive"
                 },
-                content=b''.join([chunk async for chunk in stream_generator()])
+                stream=stream_generator()
             )
         
         return response

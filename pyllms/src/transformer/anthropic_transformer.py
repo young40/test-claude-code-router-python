@@ -10,20 +10,20 @@ from ..utils.log import log
 
 
 class AnthropicTransformer(Transformer):
-    """Anthropic转换器"""
+    """Anthropic transformer"""
     
     def __init__(self, options: Optional[TransformerOptions] = None):
         super().__init__(options)
         self.name = "Anthropic"
         self.end_point = "/v1/messages"
     
-    async def transform_request_out(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """将Anthropic格式转换为统一请求格式"""
+    async def transform_request_out(self, request: Dict[str, Any]) -> UnifiedChatRequest:
+        """Transform Anthropic format to unified request format"""
         log("Anthropic Request:", json.dumps(request, indent=2))
         
         messages = []
         
-        # 处理系统消息
+        # Handle system message
         if "system" in request:
             if isinstance(request["system"], str):
                 messages.append({
@@ -41,25 +41,30 @@ class AnthropicTransformer(Transformer):
                     "content": text_parts
                 })
         
-        # 处理消息
-        request_messages = request.get("messages", [])
-        if isinstance(request_messages, list):
-            for msg in request_messages:
-                if msg.get("role") in ["user", "assistant"]:
-                    if msg.get("role") == "user":
-                        # 处理用户消息
-                        if isinstance(msg.get("content"), str):
-                            messages.append({
-                                "role": "user",
-                                "content": msg["content"]
-                            })
-                        elif isinstance(msg.get("content"), list):
-                            # 处理工具结果
-                            tool_parts = [
-                                part for part in msg["content"]
-                                if part.get("type") == "tool_result" and part.get("tool_use_id")
-                            ]
-                            
+        # Handle messages
+        request_messages = json.loads(json.dumps(request.get("messages", [])))
+        
+        for msg in request_messages:
+            if msg.get("role") in ["user", "assistant"]:
+                unified_msg = {
+                    "role": msg["role"],
+                    "content": None
+                }
+                
+                if isinstance(msg.get("content"), str):
+                    messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
+                elif isinstance(msg.get("content"), list):
+                    if msg["role"] == "user":
+                        # Handle tool results
+                        tool_parts = [
+                            part for part in msg["content"]
+                            if part.get("type") == "tool_result" and part.get("tool_use_id")
+                        ]
+                        
+                        if tool_parts:
                             for tool in tool_parts:
                                 tool_message = {
                                     "role": "tool",
@@ -68,80 +73,69 @@ class AnthropicTransformer(Transformer):
                                     "cache_control": tool.get("cache_control")
                                 }
                                 messages.append(tool_message)
-                            
-                            # 处理文本部分
-                            text_parts = [
-                                part for part in msg["content"]
-                                if part.get("type") == "text" and part.get("text")
-                            ]
-                            
-                            if text_parts:
-                                messages.append({
-                                    "role": "user",
-                                    "content": text_parts
-                                })
-                    
-                    elif msg.get("role") == "assistant":
-                        # 处理助手消息
+                        
+                        # Handle text parts
+                        text_parts = [
+                            part for part in msg["content"]
+                            if part.get("type") == "text" and part.get("text")
+                        ]
+                        
+                        if text_parts:
+                            messages.append({
+                                "role": "user",
+                                "content": text_parts
+                            })
+                    elif msg["role"] == "assistant":
+                        # Handle assistant message
                         assistant_message = {
                             "role": "assistant",
                             "content": None
                         }
                         
-                        if isinstance(msg.get("content"), str):
-                            assistant_message["content"] = msg["content"]
-                        elif isinstance(msg.get("content"), list):
-                            # 处理文本部分
-                            text_parts = [
-                                part for part in msg["content"]
-                                if part.get("type") == "text" and part.get("text")
-                            ]
-                            
-                            if text_parts:
-                                assistant_message["content"] = "\n".join(part["text"] for part in text_parts)
-                            
-                            # 处理工具调用
-                            tool_call_parts = [
-                                part for part in msg["content"]
-                                if part.get("type") == "tool_use" and part.get("id")
-                            ]
-                            
-                            if tool_call_parts:
-                                assistant_message["tool_calls"] = [
-                                    {
-                                        "id": tool["id"],
-                                        "type": "function",
-                                        "function": {
-                                            "name": tool["name"],
-                                            "arguments": json.dumps(tool.get("input", {}))
-                                        }
+                        text_parts = [
+                            part for part in msg["content"]
+                            if part.get("type") == "text" and part.get("text")
+                        ]
+                        
+                        if text_parts:
+                            assistant_message["content"] = "\n".join(part["text"] for part in text_parts)
+                        
+                        # Handle tool calls
+                        tool_call_parts = [
+                            part for part in msg["content"]
+                            if part.get("type") == "tool_use" and part.get("id")
+                        ]
+                        
+                        if tool_call_parts:
+                            assistant_message["tool_calls"] = [
+                                {
+                                    "id": tool["id"],
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool["name"],
+                                        "arguments": json.dumps(tool.get("input", {}))
                                     }
-                                    for tool in tool_call_parts
-                                ]
+                                }
+                                for tool in tool_call_parts
+                            ]
                         
                         messages.append(assistant_message)
         
-        # 构建统一请求
-        result = {
-            "messages": messages,
-            "model": request.get("model", ""),
-            "max_tokens": request.get("max_tokens"),
-            "temperature": request.get("temperature"),
-            "stream": request.get("stream", False)
-        }
-        
-        # 处理工具
-        if request.get("tools"):
-            result["tools"] = self._convert_anthropic_tools_to_unified(request["tools"])
-        
-        # 处理工具选择
-        if request.get("tool_choice"):
-            result["tool_choice"] = request["tool_choice"]
+        # Build unified request
+        result = UnifiedChatRequest(
+            messages=messages,
+            model=request.get("model", ""),
+            max_tokens=request.get("max_tokens"),
+            temperature=request.get("temperature"),
+            stream=request.get("stream", False),
+            tools=self._convert_anthropic_tools_to_unified(request["tools"]) if request.get("tools") else None,
+            tool_choice=request.get("tool_choice")
+        )
         
         return result
     
     async def transform_response_in(self, response: httpx.Response) -> httpx.Response:
-        """转换响应输入"""
+        """Transform provider response to unified response format"""
         is_stream = "text/event-stream" in response.headers.get("content-type", "")
         
         if is_stream:
@@ -166,8 +160,8 @@ class AnthropicTransformer(Transformer):
                 json=anthropic_response
             )
     
-    def _convert_anthropic_tools_to_unified(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """将Anthropic工具转换为统一格式"""
+    def _convert_anthropic_tools_to_unified(self, tools: List[Dict[str, Any]]) -> List[UnifiedTool]:
+        """Convert Anthropic tools to unified format"""
         return [
             {
                 "type": "function",
@@ -484,7 +478,7 @@ class AnthropicTransformer(Transformer):
             await writer.wait_closed()
     
     def _convert_openai_response_to_anthropic(self, openai_response: Dict[str, Any]) -> Dict[str, Any]:
-        """将OpenAI响应转换为Anthropic响应"""
+        """Convert OpenAI response to Anthropic response format"""
         log("Original OpenAI response:", json.dumps(openai_response, indent=2))
         
         choice = openai_response.get("choices", [{}])[0]
@@ -493,19 +487,25 @@ class AnthropicTransformer(Transformer):
         
         content = []
         
-        # 处理文本内容
+        # Handle text content
         if choice.get("message", {}).get("content"):
             content.append({
                 "type": "text",
                 "text": choice["message"]["content"]
             })
         
-        # 处理工具调用
+        # Handle tool calls
         if choice.get("message", {}).get("tool_calls"):
             for tool_call in choice["message"]["tool_calls"]:
                 try:
                     arguments_str = tool_call.get("function", {}).get("arguments", "{}")
-                    parsed_input = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                    
+                    if isinstance(arguments_str, object):
+                        parsed_input = arguments_str
+                    elif isinstance(arguments_str, str):
+                        parsed_input = json.loads(arguments_str)
+                    else:
+                        parsed_input = {}
                 except json.JSONDecodeError:
                     parsed_input = {"text": arguments_str}
                 
@@ -516,7 +516,7 @@ class AnthropicTransformer(Transformer):
                     "input": parsed_input
                 })
         
-        # 映射停止原因
+        # Map stop reason
         stop_reason_mapping = {
             "stop": "end_turn",
             "length": "max_tokens",
@@ -526,7 +526,7 @@ class AnthropicTransformer(Transformer):
         
         stop_reason = stop_reason_mapping.get(choice.get("finish_reason"), "end_turn")
         
-        # 构建Anthropic响应
+        # Build Anthropic response
         result = {
             "id": openai_response.get("id", ""),
             "type": "message",
@@ -545,6 +545,6 @@ class AnthropicTransformer(Transformer):
         return result
     
     def _get_encoder(self):
-        """获取文本编码器"""
+        """Get text encoder"""
         import codecs
         return codecs.getencoder('utf-8')

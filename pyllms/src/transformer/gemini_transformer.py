@@ -1,5 +1,6 @@
 import json
 import asyncio
+import time
 from typing import Dict, Any, Optional, List, Union
 from urllib.parse import urljoin
 import httpx
@@ -10,7 +11,7 @@ from ..utils.log import log
 
 
 class GeminiTransformer(Transformer):
-    """Gemini转换器"""
+    """Gemini transformer"""
     
     def __init__(self, options: Optional[TransformerOptions] = None):
         super().__init__(options)
@@ -22,16 +23,22 @@ class GeminiTransformer(Transformer):
         request: UnifiedChatRequest, 
         provider: LLMProvider
     ) -> Dict[str, Any]:
-        """将统一请求格式转换为Gemini格式"""
+        """Transform unified request format to Gemini format"""
         
-        # 转换消息
+        # Convert messages
         contents = []
         for message in request.messages:
-            role = "model" if message.role == "assistant" else "user"
+            # Determine role
+            if message.role == "assistant":
+                role = "model"
+            elif message.role in ["user", "system", "tool"]:
+                role = "user"
+            else:
+                role = "user"  # Default to user if role is not recognized
             
             parts = []
             
-            # 处理内容
+            # Handle content
             if isinstance(message.content, str):
                 parts.append({"text": message.content})
             elif isinstance(message.content, list):
@@ -39,12 +46,13 @@ class GeminiTransformer(Transformer):
                     if hasattr(content, 'type') and content.type == "text":
                         parts.append({"text": getattr(content, 'text', '')})
             
-            # 处理工具调用
+            # Handle tool calls
             if hasattr(message, 'tool_calls') and message.tool_calls:
                 for tool_call in message.tool_calls:
+                    tool_id = tool_call.id or f"tool_{hash(str(tool_call))}"[:15]
                     parts.append({
                         "functionCall": {
-                            "id": tool_call.id or f"tool_{hash(str(tool_call))}"[:15],
+                            "id": tool_id,
                             "name": tool_call.function.get("name", ""),
                             "args": json.loads(tool_call.function.get("arguments", "{}"))
                         }
@@ -55,15 +63,20 @@ class GeminiTransformer(Transformer):
                 "parts": parts
             })
         
-        # 转换工具
+        # Convert tools
         tools = []
         if hasattr(request, 'tools') and request.tools:
             function_declarations = []
             for tool in request.tools:
                 if tool.type == "function":
-                    func_def = tool.function.copy()
+                    # Create a copy to avoid modifying the original
+                    func_def = {
+                        "name": tool.function.get("name", ""),
+                        "description": tool.function.get("description", ""),
+                        "parameters": tool.function.get("parameters", {}).copy() if tool.function.get("parameters") else {}
+                    }
                     
-                    # 清理不支持的字段
+                    # Clean up unsupported fields
                     if "parameters" in func_def and isinstance(func_def["parameters"], dict):
                         params = func_def["parameters"]
                         if "$schema" in params:
@@ -71,7 +84,7 @@ class GeminiTransformer(Transformer):
                         if "additionalProperties" in params:
                             del params["additionalProperties"]
                         
-                        if "properties" in params:
+                        if "properties" in params and params["properties"]:
                             for key, prop in params["properties"].items():
                                 if isinstance(prop, dict):
                                     if "$schema" in prop:
@@ -85,31 +98,26 @@ class GeminiTransformer(Transformer):
                                         if "additionalProperties" in prop["items"]:
                                             del prop["items"]["additionalProperties"]
                                     
-                                    if (prop.get("type") == "string" and 
-                                        "format" in prop and 
-                                        prop["format"] not in ["enum", "date-time"]):
-                                        del prop["format"]
+                                    if prop.get("type") == "string" and "format" in prop:
+                                        if prop["format"] not in ["enum", "date-time"]:
+                                            del prop["format"]
                     
-                    function_declarations.append({
-                        "name": func_def.get("name", ""),
-                        "description": func_def.get("description", ""),
-                        "parameters": func_def.get("parameters", {})
-                    })
+                    function_declarations.append(func_def)
             
             if function_declarations:
                 tools.append({"functionDeclarations": function_declarations})
         
-        # 构建请求体
+        # Build request body
         body = {
             "contents": contents,
             "tools": tools
         }
         
-        # 构建URL
+        # Build URL
         action = "streamGenerateContent?alt=sse" if request.stream else "generateContent"
         url = urljoin(provider.base_url, f"./{request.model}:{action}")
         
-        # 构建配置
+        # Build config
         config = {
             "url": url,
             "headers": {
@@ -124,7 +132,7 @@ class GeminiTransformer(Transformer):
         }
     
     async def transform_request_out(self, request: Dict[str, Any]) -> UnifiedChatRequest:
-        """将Gemini格式转换为统一请求格式"""
+        """Transform Gemini format to unified request format"""
         contents = request.get("contents", [])
         tools = request.get("tools", [])
         model = request.get("model", "")
@@ -133,13 +141,18 @@ class GeminiTransformer(Transformer):
         stream = request.get("stream")
         tool_choice = request.get("tool_choice")
         
-        # 转换消息
+        # Convert messages
         messages = []
         for content in contents:
             if isinstance(content, str):
                 messages.append({
                     "role": "user",
                     "content": content
+                })
+            elif isinstance(content, dict) and "text" in content:
+                messages.append({
+                    "role": "user",
+                    "content": content.get("text", "") or None
                 })
             elif isinstance(content, dict):
                 if content.get("role") == "user":
@@ -171,21 +184,23 @@ class GeminiTransformer(Transformer):
                         "content": message_content
                     })
         
-        # 转换工具
+        # Convert tools
         unified_tools = []
-        for tool in tools:
-            if "functionDeclarations" in tool:
-                for func_decl in tool["functionDeclarations"]:
-                    unified_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": func_decl.get("name", ""),
-                            "description": func_decl.get("description", ""),
-                            "parameters": func_decl.get("parameters", {})
-                        }
-                    })
+        if tools:
+            for tool in tools:
+                if "functionDeclarations" in tool:
+                    for func_decl in tool["functionDeclarations"]:
+                        unified_tools.append({
+                            "type": "function",
+                            "function": {
+                                "name": func_decl.get("name", ""),
+                                "description": func_decl.get("description", ""),
+                                "parameters": func_decl.get("parameters", {})
+                            }
+                        })
         
-        return UnifiedChatRequest(
+        # Create unified request
+        unified_request = UnifiedChatRequest(
             messages=messages,
             model=model,
             max_tokens=max_tokens,
@@ -194,16 +209,18 @@ class GeminiTransformer(Transformer):
             tools=unified_tools if unified_tools else None,
             tool_choice=tool_choice
         )
+        
+        return unified_request
     
     async def transform_response_out(self, response: httpx.Response) -> httpx.Response:
-        """转换响应输出"""
+        """Transform Gemini response to OpenAI format"""
         content_type = response.headers.get("Content-Type", "")
         
         if "application/json" in content_type:
-            # 处理非流式响应
+            # Handle non-streaming response
             json_response = await response.json()
             
-            # 提取工具调用
+            # Extract tool calls
             tool_calls = []
             if json_response.get("candidates") and len(json_response["candidates"]) > 0:
                 parts = json_response["candidates"][0].get("content", {}).get("parts", [])
@@ -218,7 +235,7 @@ class GeminiTransformer(Transformer):
                             }
                         })
             
-            # 构建OpenAI格式响应
+            # Build OpenAI format response
             openai_response = {
                 "id": json_response.get("responseId", ""),
                 "choices": [{
@@ -234,7 +251,7 @@ class GeminiTransformer(Transformer):
                         "tool_calls": tool_calls if tool_calls else None
                     }
                 }],
-                "created": int(asyncio.get_event_loop().time()),
+                "created": int(time.time()),
                 "model": json_response.get("modelVersion", ""),
                 "object": "chat.completion",
                 "usage": {
@@ -251,7 +268,7 @@ class GeminiTransformer(Transformer):
             )
             
         elif "stream" in content_type:
-            # 处理流式响应
+            # Handle streaming response
             if not hasattr(response, 'aiter_bytes'):
                 return response
             
@@ -268,7 +285,7 @@ class GeminiTransformer(Transformer):
                         log("gemini chunk:", chunk_str)
                         chunk_data = json.loads(chunk_str)
                         
-                        # 提取工具调用
+                        # Extract tool calls
                         tool_calls = []
                         if chunk_data.get("candidates") and len(chunk_data["candidates"]) > 0:
                             parts = chunk_data["candidates"][0].get("content", {}).get("parts", [])
@@ -283,7 +300,7 @@ class GeminiTransformer(Transformer):
                                         }
                                     })
                         
-                        # 构建OpenAI格式流响应
+                        # Build OpenAI format streaming response
                         openai_chunk = {
                             "choices": [{
                                 "delta": {
@@ -296,10 +313,10 @@ class GeminiTransformer(Transformer):
                                     "tool_calls": tool_calls if tool_calls else None
                                 },
                                 "finish_reason": chunk_data.get("candidates", [{}])[0].get("finishReason", "").lower() or None,
-                                "index": chunk_data.get("candidates", [{}])[0].get("index", 1 if tool_calls else 0),
+                                "index": chunk_data.get("candidates", [{}])[0].get("index", 0) or (1 if tool_calls else 0),
                                 "logprobs": None
                             }],
-                            "created": int(asyncio.get_event_loop().time()),
+                            "created": int(time.time()),
                             "id": chunk_data.get("responseId", ""),
                             "model": chunk_data.get("modelVersion", ""),
                             "object": "chat.completion.chunk",
@@ -313,14 +330,15 @@ class GeminiTransformer(Transformer):
                         log(f"Error parsing Gemini chunk: {e}")
                         continue
             
+            # Create a streaming response
             return httpx.Response(
                 status_code=response.status_code,
                 headers={
-                    "Content-Type": content_type,
+                    "Content-Type": "text/event-stream",
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive"
                 },
-                content=b''.join([chunk async for chunk in stream_generator()])
+                stream=stream_generator()
             )
         
         return response

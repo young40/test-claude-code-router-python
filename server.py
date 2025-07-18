@@ -37,7 +37,24 @@ class ServerAdapter:
         """启动服务器"""
         if hasattr(self.server, "start"):
             if callable(self.server.start):
-                await self.server.start()
+                # 创建一个新的事件循环来运行服务器
+                import asyncio
+                import threading
+                
+                def run_server():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(self.server.start())
+                    except Exception as e:
+                        print(f"Error in server thread: {e}")
+                    finally:
+                        loop.close()
+                
+                # 在新线程中启动服务器
+                server_thread = threading.Thread(target=run_server)
+                server_thread.daemon = True
+                server_thread.start()
             else:
                 print("Server.start is not callable")
         else:

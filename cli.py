@@ -55,9 +55,7 @@ async def main():
     command = sys.argv[1] if len(sys.argv) > 1 else None
     
     if command == "start":
-        # Check if --silent flag is provided
-        silent_mode = "--silent" in sys.argv
-        await run({"silent": silent_mode})
+        await run()
     
     elif command == "stop":
         try:

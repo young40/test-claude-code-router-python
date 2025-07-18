@@ -74,8 +74,7 @@ async def run(options: Optional[Dict[str, Any]] = None):
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    if not silent_mode:
-        print(host)
+    print(host)
     
     # Use port from environment variable if set (for background process)
     service_port = int(os.environ.get("SERVICE_PORT", port))
@@ -181,9 +180,9 @@ async def run(options: Optional[Dict[str, Any]] = None):
             reply.headers["X-Custom-Header"] = "pre_handler_called"
     
     # 添加中间件，注意顺序很重要：先日志记录，再认证，最后路由
-    server.add_hook("pre_handler", log_callback_adapter)
-    server.add_hook("pre_handler", auth_adapter)
-    server.add_hook("pre_handler", router_adapter)
+    # server.add_hook("pre_handler", log_callback_adapter)
+    # server.add_hook("pre_handler", auth_adapter)
+    # server.add_hook("pre_handler", router_adapter)
     
     try:
         # Start the server (now runs in a separate thread)

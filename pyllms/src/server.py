@@ -10,7 +10,7 @@ from .services.llm import LLMService
 from .services.provider import ProviderService
 from .services.transformer import TransformerService
 from .utils.log import log
-from .api.middleware import error_handler
+from .api.middleware import error_handler, setup_error_handlers
 from .api.routes import register_api_routes
 
 
@@ -39,23 +39,26 @@ class Server:
             
         self.config_service = ConfigService(options)
         self.transformer_service = TransformerService(self.config_service)
+        self.transformer_initialized = False
         
-        # 初始化转换器服务
-        self.transformer_service.initialize()
-        
-        # 初始化提供者服务和LLM服务
+        # Initialize provider service and LLM service
         self.provider_service = ProviderService(self.config_service, self.transformer_service)
         self.llm_service = LLMService(self.provider_service)
         
-        # 创建FastAPI应用
+        # Create FastAPI application
         self.app = create_app()
         
-        # 存储服务器实例到应用状态中
+        # Store server instance in application state
         self.app.state._server = self
     
     async def start(self):
         """启动服务器"""
         try:
+            # Initialize transformer service asynchronously
+            if not self.transformer_initialized:
+                await self.transformer_service.initialize()
+                self.transformer_initialized = True
+            
             # 添加请求日志中间件
             @self.app.middleware("http")
             async def request_logger_middleware(request: Request, call_next):
@@ -165,9 +168,7 @@ class Server:
                 return response
             
             # 注册错误处理器
-            @self.app.exception_handler(Exception)
-            async def exception_handler(request: Request, exc: Exception):
-                return await error_handler(exc, request)
+            setup_error_handlers(self.app)
             
             # 注册API路由
             register_api_routes(self.app)

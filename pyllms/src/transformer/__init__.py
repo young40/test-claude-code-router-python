@@ -7,7 +7,7 @@ from .maxtoken_transformer import MaxTokenTransformer
 from .groq_transformer import GroqTransformer
 from .openai_transformer import OpenAITransformer
 
-# 导出所有转换器类
+# Export all transformer classes
 __all__ = [
     "AnthropicTransformer",
     "GeminiTransformer", 
@@ -20,7 +20,8 @@ __all__ = [
     "transformers"
 ]
 
-# 创建转换器字典，供 TransformerService 使用
+# Create transformer dictionary for TransformerService to use
+# This matches the structure in TypeScript's transformer/index.ts
 transformers = {
     "AnthropicTransformer": AnthropicTransformer,
     "GeminiTransformer": GeminiTransformer,
@@ -29,5 +30,7 @@ transformers = {
     "OpenrouterTransformer": OpenrouterTransformer,
     "MaxTokenTransformer": MaxTokenTransformer,
     "GroqTransformer": GroqTransformer,
+    # OpenAITransformer is included in Python for compatibility
+    # It's not in the TypeScript index.ts but exists as a separate file
     "OpenAITransformer": OpenAITransformer
 }

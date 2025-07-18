@@ -85,6 +85,7 @@ class ProviderService:
                 
             except Exception as error:
                 log(f"{provider_config.get('name', 'Unknown')} provider registered error: {error}")
+                # Continue with other providers even if one fails
     
     def register_provider(self, request: RegisterProviderRequest) -> LLMProvider:
         """注册提供者"""

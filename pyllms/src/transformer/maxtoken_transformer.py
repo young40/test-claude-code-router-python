@@ -1,28 +1,29 @@
-from typing import Optional
+from typing import Optional, Union, Dict, Any
 
-from ..types.transformer import Transformer, TransformerOptions
-from ..types.llm import UnifiedChatRequest
+from ..types.transformer import Transformer, TransformerOptions, TransformRequestResult
+from ..types.llm import UnifiedChatRequest, LLMProvider
 
 
 class MaxTokenTransformer(Transformer):
-    """最大Token限制转换器"""
+    """MaxToken Transformer - Limits the maximum tokens in a request"""
     
     TransformerName = "maxtoken"
     
     def __init__(self, options: Optional[TransformerOptions] = None):
         super().__init__(options)
-        self.max_tokens = options.get("max_tokens") if options else None
+        self.max_tokens = self.options.get("max_tokens") if self.options else None
     
     async def transform_request_in(
         self, 
-        request: UnifiedChatRequest, 
-        provider=None
-    ) -> UnifiedChatRequest:
-        """转换请求输入，限制最大token数"""
-        if (hasattr(request, 'max_tokens') and 
-            request.max_tokens and 
-            self.max_tokens and 
-            request.max_tokens > self.max_tokens):
-            request.max_tokens = self.max_tokens
+        request: Union[UnifiedChatRequest, Dict[str, Any]], 
+        provider: LLMProvider = None
+    ) -> Union[Dict[str, Any], TransformRequestResult]:
+        """Transform request input, limiting the maximum token count"""
+        # Convert request to dict if it's an object
+        request_dict = request.__dict__ if hasattr(request, '__dict__') else request
         
-        return request
+        # Apply max token limit if needed
+        if request_dict.get('max_tokens') and self.max_tokens and request_dict['max_tokens'] > self.max_tokens:
+            request_dict['max_tokens'] = self.max_tokens
+        
+        return request_dict

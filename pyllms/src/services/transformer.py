@@ -16,8 +16,14 @@ class TransformerService:
     
     def register_transformer(self, name: str, transformer: Union[Transformer, TransformerConstructor]) -> None:
         """Register a transformer"""
-        # If it's a class and not an instance, try to instantiate it
-        if not hasattr(transformer, 'end_point') and callable(transformer):
+        # If it's a class with TransformerName static property, register it as is
+        if hasattr(transformer, 'TransformerName') and isinstance(transformer.TransformerName, str):
+            self.transformers[name] = transformer
+            log(f"register transformer: {name} (class with TransformerName)")
+            return
+            
+        # If it's a callable (class) and not an instance, try to instantiate it
+        if callable(transformer) and not hasattr(transformer, 'end_point'):
             try:
                 # Try to instantiate the transformer class
                 instance = transformer()
@@ -28,8 +34,10 @@ class TransformerService:
             except Exception as e:
                 # If instantiation fails, register the class as is
                 log(f"Error instantiating transformer {name}: {e}")
+                self.transformers[name] = transformer
+                return
         
-        # Register the transformer as is
+        # Register the transformer as is (already an instance)
         self.transformers[name] = transformer
         endpoint_info = f" (endpoint: {transformer.end_point})" if hasattr(transformer, 'end_point') and transformer.end_point else " (no endpoint)"
         log(f"register transformer: {name}{endpoint_info}")
@@ -51,17 +59,16 @@ class TransformerService:
             if hasattr(transformer, 'end_point') and transformer.end_point:
                 result.append({"name": name, "transformer": transformer})
             # Check if it's a transformer class that needs to be instantiated
-            elif not hasattr(transformer, 'end_point'):
+            elif callable(transformer) and not hasattr(transformer, 'end_point'):
                 try:
                     # Try to instantiate the transformer class
                     instance = transformer()
                     if hasattr(instance, 'end_point') and instance.end_point:
-                        # Register the instance instead of the class
+                        # Register the instance instead of the class for future use
                         self.transformers[name] = instance
                         result.append({"name": name, "transformer": instance})
                 except Exception as e:
                     # Log the error but continue processing other transformers
-                    from ..utils.log import log
                     log(f"Error instantiating transformer {name}: {e}")
         
         return result
@@ -75,7 +82,7 @@ class TransformerService:
             if hasattr(transformer, 'end_point') and not transformer.end_point:
                 result.append({"name": name, "transformer": transformer})
             # Check if it's a transformer class that needs to be instantiated
-            elif not hasattr(transformer, 'end_point'):
+            elif callable(transformer) and not hasattr(transformer, 'end_point'):
                 try:
                     # Try to instantiate the transformer class
                     instance = transformer()
@@ -86,9 +93,10 @@ class TransformerService:
                 except Exception as e:
                     # If we can't instantiate, consider it as without endpoint
                     result.append({"name": name, "transformer": transformer})
-                    # Log the error but continue processing other transformers
-                    from ..utils.log import log
                     log(f"Error instantiating transformer {name}: {e}")
+            # If it's not callable and doesn't have an endpoint, add it as is
+            elif not hasattr(transformer, 'end_point'):
+                result.append({"name": name, "transformer": transformer})
         
         return result
     
@@ -113,13 +121,20 @@ class TransformerService:
                     # Create an instance
                     instance = module.Transformer(config.get("options", {}))
                     if not hasattr(instance, 'name'):
-                        raise ValueError(f"Transformer instance from {config['path']} does not have a name property.")
+                        log(f"Transformer instance from {config['path']} does not have a name property.")
+                        return False
                     
                     self.register_transformer(instance.name, instance)
                     return True
             return False
+        except ImportError as error:
+            log(f"Failed to import transformer module ({config.get('path')}): {error}")
+            return False
+        except AttributeError as error:
+            log(f"Transformer module ({config.get('path')}) does not have expected attributes: {error}")
+            return False
         except Exception as error:
-            log(f"load transformer ({config.get('path')}) error:", error)
+            log(f"Unexpected error loading transformer ({config.get('path')}): {error}")
             return False
     
     async def initialize(self) -> None:
@@ -132,6 +147,10 @@ class TransformerService:
             await self.load_from_config()
         except Exception as error:
             log("TransformerService init error:", error)
+            # Log the full traceback for debugging
+            import traceback
+            log(traceback.format_exc())
+            # Continue with partial initialization rather than failing completely
     
     async def register_default_transformers_internal(self) -> None:
         """Register default transformers internally"""
@@ -141,14 +160,19 @@ class TransformerService:
             
             # Register all transformers
             for transformer_name, transformer_class in transformers.items():
+                # Check if the transformer has a static TransformerName property
                 if hasattr(transformer_class, 'TransformerName') and isinstance(transformer_class.TransformerName, str):
                     # Register the transformer class with its static name
                     self.register_transformer(transformer_class.TransformerName, transformer_class)
                 else:
+                    # Try to instantiate the transformer
                     try:
-                        # Create an instance and register it
+                        # Create an instance
                         transformer_instance = transformer_class()
+                        
+                        # Determine the name to use for registration
                         if hasattr(transformer_instance, 'name') and transformer_instance.name:
+                            # Use the instance's name property
                             self.register_transformer(transformer_instance.name, transformer_instance)
                         else:
                             # Use the transformer_name as fallback

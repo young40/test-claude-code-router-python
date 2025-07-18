@@ -1,6 +1,7 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 from fastapi import Request, Response, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 import traceback
 
 from ..utils.log import log
@@ -57,20 +58,46 @@ async def error_handler(error: Exception, request: Request) -> JSONResponse:
                 "code": "http_error"
             }
         }
+    elif isinstance(error, RequestValidationError):
+        status_code = 400
+        response = {
+            "error": {
+                "message": "Validation error",
+                "type": "validation_error",
+                "code": "invalid_request",
+                "details": error.errors()
+            }
+        }
     else:
         status_code = 500
         # Include more detailed error information for debugging
         response = {
             "error": {
-                "message": f"Internal Server Error: {str(error)}",
+                "message": str(error) or "Internal Server Error",
                 "type": "api_error",
-                "code": "internal_error",
-                "details": {
-                    "error_type": error.__class__.__name__,
-                    "path": request.url.path
-                }
+                "code": "internal_error"
             }
         }
     
     # Ensure consistent error response format with TypeScript implementation
     return JSONResponse(status_code=status_code, content=response)
+
+
+def setup_error_handlers(app):
+    """Setup error handlers for the FastAPI application"""
+    
+    @app.exception_handler(ApiError)
+    async def api_error_handler(request: Request, error: ApiError):
+        return await error_handler(error, request)
+    
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, error: HTTPException):
+        return await error_handler(error, request)
+    
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, error: RequestValidationError):
+        return await error_handler(error, request)
+    
+    @app.exception_handler(Exception)
+    async def general_exception_handler(request: Request, error: Exception):
+        return await error_handler(error, request)

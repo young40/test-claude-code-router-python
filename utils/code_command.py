@@ -14,7 +14,7 @@ from utils import read_config_file
 async def execute_code_command(args: List[str] = None):
     """Execute claude code command"""
     if args is None:
-        args = []
+        args = ["--debug"]
     
     # Set environment variables
     config = await read_config_file()

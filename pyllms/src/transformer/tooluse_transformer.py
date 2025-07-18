@@ -1,28 +1,33 @@
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import httpx
 from fastapi.responses import StreamingResponse
 
-from ..types.transformer import Transformer, TransformerOptions
-from ..types.llm import UnifiedChatRequest
+from ..types.transformer import Transformer, TransformerOptions, TransformRequestResult
+from ..types.llm import UnifiedChatRequest, LLMProvider
 from ..utils.log import log
 
 
 class TooluseTransformer(Transformer):
-    """工具使用转换器"""
+    """ToolUse Transformer - Adds tool mode functionality"""
+    
+    TransformerName = "tooluse"
     
     def __init__(self, options: Optional[TransformerOptions] = None):
         super().__init__(options)
-        self.name = "tooluse"
+        # The name will be set from TransformerName in the base class
     
     async def transform_request_in(
         self, 
-        request: UnifiedChatRequest, 
-        provider=None
-    ) -> UnifiedChatRequest:
-        """转换请求输入，添加工具模式系统提示"""
+        request: Union[UnifiedChatRequest, Dict[str, Any]], 
+        provider: LLMProvider = None
+    ) -> Union[Dict[str, Any], TransformRequestResult]:
+        """Transform request input, adding tool mode system prompt"""
         
-        # 添加系统提示
+        # Convert request to dict if it's an object
+        request_dict = request.__dict__ if hasattr(request, '__dict__') else request
+        
+        # Add system prompt
         system_message = {
             "role": "system",
             "content": """<system-reminder>Tool mode is active. The user expects you to proactively execute the most suitable tool to help complete the task. 
@@ -30,13 +35,14 @@ Before invoking a tool, you must carefully evaluate whether it matches the curre
 Always prioritize completing the user's task effectively and efficiently by using tools whenever appropriate.</system-reminder>"""
         }
         
-        request.messages.append(system_message)
+        if "messages" in request_dict:
+            request_dict["messages"].append(system_message)
         
-        # 如果有工具，添加ExitTool并设置tool_choice为required
-        if hasattr(request, 'tools') and request.tools:
-            request.tool_choice = "required"
+        # If there are tools, add ExitTool and set tool_choice to required
+        if "tools" in request_dict and request_dict["tools"]:
+            request_dict["tool_choice"] = "required"
             
-            # 添加ExitTool到工具列表开头
+            # Add ExitTool to the beginning of the tools list
             exit_tool = {
                 "type": "function",
                 "function": {
@@ -59,42 +65,49 @@ Examples:
                 }
             }
             
-            request.tools.insert(0, exit_tool)
+            request_dict["tools"].insert(0, exit_tool)
         
-        return request
+        return request_dict
     
     async def transform_response_out(self, response: httpx.Response) -> httpx.Response:
-        """转换响应输出，处理ExitTool调用"""
+        """Transform response output, handling ExitTool calls"""
         content_type = response.headers.get("Content-Type", "")
         
         if "application/json" in content_type:
-            # 处理非流式响应
-            json_response = await response.json()
-            
-            # 检查是否有ExitTool调用
-            if (json_response.get("choices", [{}])[0].get("message", {}).get("tool_calls") and
-                json_response["choices"][0]["message"]["tool_calls"][0].get("function", {}).get("name") == "ExitTool"):
+            # Handle non-streaming response
+            try:
+                json_response = await response.json()
                 
-                tool_call = json_response["choices"][0]["message"]["tool_calls"][0]
-                try:
-                    tool_arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
-                    json_response["choices"][0]["message"]["content"] = tool_arguments.get("response", "")
-                    del json_response["choices"][0]["message"]["tool_calls"]
-                except json.JSONDecodeError:
-                    pass
-            
-            return httpx.Response(
-                status_code=response.status_code,
-                headers=response.headers,
-                json=json_response
-            )
+                # Check for ExitTool call
+                if (json_response.get("choices") and 
+                    len(json_response["choices"]) > 0 and
+                    json_response["choices"][0].get("message", {}).get("tool_calls") and
+                    len(json_response["choices"][0]["message"]["tool_calls"]) > 0 and
+                    json_response["choices"][0]["message"]["tool_calls"][0].get("function", {}).get("name") == "ExitTool"):
+                    
+                    tool_call = json_response["choices"][0]["message"]["tool_calls"][0]
+                    try:
+                        tool_arguments = json.loads(tool_call["function"].get("arguments", "{}"))
+                        json_response["choices"][0]["message"]["content"] = tool_arguments.get("response", "")
+                        del json_response["choices"][0]["message"]["tool_calls"]
+                    except json.JSONDecodeError:
+                        log.error("Failed to parse ExitTool arguments")
+                
+                return httpx.Response(
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    content=json.dumps(json_response).encode('utf-8')
+                )
+            except Exception as e:
+                log.error(f"Error processing JSON response: {str(e)}")
+                return response
             
         elif "stream" in content_type:
-            # 处理流式响应
+            # Handle streaming response
             if not hasattr(response, 'aiter_bytes'):
                 return response
             
-            # Create a new streaming response that processes the stream on-the-fly
+            # Create a streaming response that processes the stream on-the-fly
             async def process_stream():
                 exit_tool_index = -1
                 exit_tool_response = ""
@@ -111,11 +124,14 @@ Examples:
                             try:
                                 data = json.loads(line[6:])
                                 
-                                # 检查工具调用
-                                if data.get("choices", [{}])[0].get("delta", {}).get("tool_calls"):
+                                # Check for tool calls
+                                if (data.get("choices") and 
+                                    len(data["choices"]) > 0 and
+                                    data["choices"][0].get("delta", {}).get("tool_calls")):
+                                    
                                     tool_call = data["choices"][0]["delta"]["tool_calls"][0]
                                     
-                                    # 检查是否是ExitTool
+                                    # Check if it's ExitTool
                                     if tool_call.get("function", {}).get("name") == "ExitTool":
                                         exit_tool_index = tool_call.get("index", 0)
                                         continue
@@ -125,39 +141,40 @@ Examples:
                                         
                                         exit_tool_response += tool_call["function"]["arguments"]
                                         try:
-                                            # Try to parse the complete response if we have enough data
-                                            if exit_tool_response.endswith("}"):
-                                                response_data = json.loads(exit_tool_response)
-                                                data["choices"] = [{
-                                                    "delta": {
-                                                        "role": "assistant",
-                                                        "content": response_data.get("response", "")
-                                                    }
-                                                }]
-                                                modified_line = f"data: {json.dumps(data)}\n\n"
-                                                yield modified_line.encode('utf-8')
+                                            # Try to parse the response if we have enough data
+                                            response_obj = json.loads(exit_tool_response)
+                                            data["choices"] = [{
+                                                "delta": {
+                                                    "role": "assistant",
+                                                    "content": response_obj.get("response", "")
+                                                }
+                                            }]
+                                            modified_line = f"data: {json.dumps(data)}\n\n"
+                                            yield modified_line.encode('utf-8')
                                         except json.JSONDecodeError:
                                             # If we can't parse yet, continue collecting
                                             pass
                                         continue
                                 
-                                # 发送有效的delta
-                                if (data.get("choices", [{}])[0].get("delta") and 
+                                # Send valid deltas
+                                if (data.get("choices") and 
+                                    len(data["choices"]) > 0 and
+                                    data["choices"][0].get("delta") and 
                                     len(data["choices"][0]["delta"]) > 0):
                                     modified_line = f"data: {json.dumps(data)}\n\n"
                                     yield modified_line.encode('utf-8')
                                     
                             except json.JSONDecodeError:
-                                # JSON解析失败，传递原始行
+                                # JSON parsing failed, pass through the original line
                                 yield (line + "\n").encode('utf-8')
                         elif line.strip() == "data: [DONE]":
                             # Pass through the DONE marker
                             yield (line + "\n\n").encode('utf-8')
                         else:
-                            # 传递非数据行
+                            # Pass through non-data lines
                             yield (line + "\n").encode('utf-8')
             
-            # Return a streaming response that will process chunks as they arrive
+            # Return a streaming response
             return StreamingResponse(
                 content=process_stream(),
                 status_code=response.status_code,

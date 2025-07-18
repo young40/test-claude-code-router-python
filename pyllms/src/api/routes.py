@@ -78,12 +78,13 @@ def register_api_routes(app: FastAPI) -> None:
                     log(f"Found matching transformer in wildcard route: {item['name']}")
                     return await process_transformer_request(request, transformer)
         
-        # Return 404 error
+        # Return 404 error using consistent error format
         log(f"No matching route found: {path}")
-        return Response(
-            content=f'{{"error": "Not Found", "path": "{path}", "method": "{request.method}"}}',
-            status_code=404,
-            media_type="application/json"
+        raise create_api_error(
+            f"Not Found: {path}",
+            404,
+            "route_not_found",
+            "api_error"
         )
     
     # Process transformer request
@@ -295,10 +296,12 @@ def register_api_routes(app: FastAPI) -> None:
                     )
         except Exception as e:
             log(f"Error processing request: {e}")
-            return Response(
-                content=f'{{"error": "Error processing request: {str(e)}"}}',
-                status_code=500,
-                media_type="application/json"
+            # Use the create_api_error function to ensure consistent error format
+            raise create_api_error(
+                f"Error processing request: {str(e)}",
+                500,
+                "request_processing_error",
+                "api_error"
             )
     
     # 提供者管理端点
@@ -336,21 +339,33 @@ def register_api_routes(app: FastAPI) -> None:
     async def get_provider(id: str):
         provider = app.state._server.provider_service.get_provider(id)
         if not provider:
-            raise HTTPException(status_code=404, detail="Provider not found")
+            raise create_api_error(
+                f"Provider '{id}' not found",
+                404,
+                "provider_not_found"
+            )
         return provider
     
     @app.put("/providers/{id}")
     async def update_provider(id: str, updates: Dict[str, Any]):
         provider = app.state._server.provider_service.update_provider(id, updates)
         if not provider:
-            raise HTTPException(status_code=404, detail="Provider not found")
+            raise create_api_error(
+                f"Provider '{id}' not found",
+                404,
+                "provider_not_found"
+            )
         return provider
     
     @app.delete("/providers/{id}")
     async def delete_provider(id: str):
         success = app.state._server.provider_service.delete_provider(id)
         if not success:
-            raise HTTPException(status_code=404, detail="Provider not found")
+            raise create_api_error(
+                f"Provider '{id}' not found",
+                404,
+                "provider_not_found"
+            )
         return {"message": "Provider deleted successfully"}
     
     @app.patch("/providers/{id}/toggle")
@@ -358,7 +373,11 @@ def register_api_routes(app: FastAPI) -> None:
         enabled = body.get("enabled", False)
         success = app.state._server.provider_service.toggle_provider(id, enabled)
         if not success:
-            raise HTTPException(status_code=404, detail="Provider not found")
+            raise create_api_error(
+                f"Provider '{id}' not found",
+                404,
+                "provider_not_found"
+            )
         return {
             "message": f"Provider {'enabled' if enabled else 'disabled'} successfully"
         }

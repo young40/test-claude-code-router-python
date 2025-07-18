@@ -1,5 +1,5 @@
-from typing import Dict, Any, Optional, Protocol, Union, TypedDict
-from abc import ABC, abstractmethod
+from typing import Dict, Any, Optional, Protocol, Union, TypedDict, Type
+from abc import ABC
 import httpx
 
 from .llm import LLMProvider, UnifiedChatRequest
@@ -17,48 +17,61 @@ class TransformRequestResult(TypedDict, total=False):
 
 
 class Transformer(ABC):
-    """Transformer base class"""
+    """Transformer base class that matches the TypeScript implementation"""
     
     def __init__(self, options: Optional[TransformerOptions] = None):
         self.options = options or {}
         self.name: Optional[str] = None
-        self.end_point: Optional[str] = None
+        self._end_point: Optional[str] = None
+    
+    @property
+    def end_point(self) -> Optional[str]:
+        """Get the endpoint (Python naming convention)"""
+        return self._end_point
+    
+    @end_point.setter
+    def end_point(self, value: Optional[str]):
+        """Set the endpoint (Python naming convention)"""
+        self._end_point = value
+    
+    @property
+    def endPoint(self) -> Optional[str]:
+        """Get the endpoint (TypeScript naming convention)"""
+        return self._end_point
+    
+    @endPoint.setter
+    def endPoint(self, value: Optional[str]):
+        """Set the endpoint (TypeScript naming convention)"""
+        self._end_point = value
     
     async def transform_request_in(
         self, 
-        request: Union[UnifiedChatRequest, Dict[str, Any]], 
+        request: UnifiedChatRequest, 
         provider: LLMProvider
-    ) -> Union[Dict[str, Any], TransformRequestResult]:
+    ) -> Dict[str, Any]:
         """
         Transform unified request format to provider-specific format
         
-        This method can return either:
-        - A dictionary with the transformed request
-        - A TransformRequestResult with both body and config
+        This method corresponds to transformRequestIn in TypeScript
         """
-        return request.__dict__ if hasattr(request, '__dict__') else request
+        return request.to_dict() if hasattr(request, 'to_dict') else request
     
     async def transform_response_in(self, response: httpx.Response) -> httpx.Response:
         """
         Transform provider response to unified response format
         
-        This is called after all transformResponseOut methods have been applied.
-        This method should be used to convert provider-specific response formats
-        to the unified format expected by the client.
+        This corresponds to transformResponseIn in TypeScript
         """
         return response
     
     async def transform_request_out(
         self, 
         request: Any
-    ) -> Union[UnifiedChatRequest, Dict[str, Any], TransformRequestResult]:
+    ) -> UnifiedChatRequest:
         """
         Transform provider-specific format to unified request format
         
-        This method can return either:
-        - A UnifiedChatRequest object
-        - A dictionary with the transformed request
-        - A TransformRequestResult with both body and config
+        This corresponds to transformRequestOut in TypeScript
         """
         if isinstance(request, dict):
             return UnifiedChatRequest(**request)
@@ -68,27 +81,25 @@ class Transformer(ABC):
         """
         Transform provider response
         
-        This is called before transformResponseIn and should be used to modify
-        the provider's response before it's transformed to the unified format.
-        This method is typically used by utility transformers that need to
-        modify the response content but not change its format.
+        This corresponds to transformResponseOut in TypeScript
         """
         return response
 
 
 class TransformerConstructor(Protocol):
-    """Transformer constructor protocol"""
+    """
+    Transformer constructor protocol that matches the TypeScript TransformerConstructor
+    """
     
     def __call__(self, options: Optional[TransformerOptions] = None) -> Transformer:
         """Create a new transformer instance"""
         ...
     
-    @property
-    def TransformerName(self) -> Optional[str]:
-        """Static transformer name"""
-        ...
+    TransformerName: Optional[str] = None
 
 
 class TransformerWithStaticName(Transformer):
-    """Transformer with static name"""
+    """
+    Transformer with static name that matches the TypeScript TransformerWithStaticName
+    """
     TransformerName: Optional[str] = None

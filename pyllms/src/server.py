@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import signal
 import sys
+import json
 
 from .services.config import ConfigService
 from .services.llm import LLMService
@@ -55,35 +56,110 @@ class Server:
     async def start(self):
         """启动服务器"""
         try:
-            # 添加预处理钩子
+            # 添加请求日志中间件
+            @self.app.middleware("http")
+            async def request_logger_middleware(request: Request, call_next):
+                # 记录请求信息
+                log(f"收到请求: {request.method} {request.url}")
+                log(f"请求头: {dict(request.headers)}")
+                log(f"查询参数: {dict(request.query_params)}")
+                
+                # 尝试读取请求体
+                if request.method in ["POST", "PUT", "PATCH"]:
+                    try:
+                        # 保存原始接收函数
+                        original_receive = request._receive
+                        
+                        # 读取请求体
+                        body_bytes = await request.body()
+                        
+                        # 尝试解析为 JSON
+                        try:
+                            body = json.loads(body_bytes)
+                            log(f"请求体 (JSON): {json.dumps(body, ensure_ascii=False)}")
+                        except:
+                            log(f"请求体 (原始): {body_bytes.decode('utf-8', errors='replace')}")
+                        
+                        # 重新构建请求体，以便后续处理
+                        async def receive_modified():
+                            return {"type": "http.request", "body": body_bytes}
+                        
+                        request._receive = receive_modified
+                    except Exception as e:
+                        log(f"读取请求体时出错: {e}")
+                
+                # 处理请求
+                log("调用下一个处理函数")
+                response = await call_next(request)
+                log(f"响应状态码: {response.status_code}")
+                
+                # 尝试读取响应体
+                try:
+                    response_body = b""
+                    async for chunk in response.body_iterator:
+                        response_body += chunk
+                    
+                    # 尝试解析为 JSON
+                    try:
+                        response_json = json.loads(response_body)
+                        log(f"响应体 (JSON): {json.dumps(response_json, ensure_ascii=False)}")
+                    except:
+                        log(f"响应体 (原始): {response_body.decode('utf-8', errors='replace')}")
+                    
+                    # 重新构建响应
+                    return Response(
+                        content=response_body,
+                        status_code=response.status_code,
+                        headers=dict(response.headers),
+                        media_type=response.media_type
+                    )
+                except Exception as e:
+                    log(f"读取响应体时出错: {e}")
+                
+                return response
+            
+            # 添加模型提供者中间件
             @self.app.middleware("http")
             async def model_provider_middleware(request: Request, call_next):
                 if request.method == "POST":
                     try:
-                        body = await request.json()
+                        # 尝试解析请求体
+                        try:
+                            body_bytes = await request.body()
+                            body = json.loads(body_bytes)
+                        except Exception as e:
+                            log(f"无法解析请求体: {e}")
+                            # 如果无法解析请求体，继续处理请求
+                            return await call_next(request)
+                        
+                        # 如果请求体中没有 model 字段，继续处理请求
                         if not body or "model" not in body:
-                            return Response(
-                                content='{"error": "Missing model in request body"}',
-                                status_code=400,
-                                media_type="application/json"
-                            )
+                            log("请求体中没有 model 字段")
+                            return await call_next(request)
                         
-                        provider, model = body["model"].split(",")
-                        body["model"] = model
-                        request.state.provider = provider
+                        # 尝试拆分 model 字段
+                        model_value = body["model"]
+                        log(f"Model 值: {model_value}")
                         
-                        # 重新构建请求体
-                        async def receive_modified():
-                            return {"type": "http.request", "body": body}
-                        
-                        request._receive = receive_modified
+                        if "," in model_value:
+                            provider, model = model_value.split(",", 1)
+                            body["model"] = model
+                            request.state.provider = provider
+                            log(f"拆分后: provider={provider}, model={model}")
+                            
+                            # 重新构建请求体
+                            body_bytes = json.dumps(body).encode("utf-8")
+                            async def receive_modified():
+                                return {"type": "http.request", "body": body_bytes}
+                            
+                            request._receive = receive_modified
+                        else:
+                            # 如果 model 字段不是以 provider,model 的格式提供的，使用默认提供者
+                            request.state.provider = "ollama"  # 使用默认提供者
+                            log(f"使用默认提供者: ollama, model={model_value}")
                     except Exception as err:
                         log(f"Error in model_provider_middleware: {err}")
-                        return Response(
-                            content='{"error": "Internal server error"}',
-                            status_code=500,
-                            media_type="application/json"
-                        )
+                        # 继续处理请求，不要中断
                 
                 response = await call_next(request)
                 return response

@@ -66,9 +66,31 @@ def count_tokens_in_content(content: Union[str, List[Dict[str, Any]]]) -> int:
 async def router(request: Any, response: Any, config: Dict[str, Any]):
     """Router middleware to select appropriate model"""
     try:
-        messages = request.get("messages", [])
-        system = request.get("system", [])
-        tools = request.get("tools", [])
+        # 从请求中获取数据，但不修改请求对象
+        request_data = {}
+        
+        # 尝试从请求中获取数据
+        try:
+            # 如果请求是 FastAPI 请求对象
+            if hasattr(request, "json"):
+                request_body = await request.json()
+                messages = request_body.get("messages", [])
+                system = request_body.get("system", [])
+                tools = request_body.get("tools", [])
+                request_data = request_body
+            # 如果请求是字典
+            elif isinstance(request, dict):
+                messages = request.get("messages", [])
+                system = request.get("system", [])
+                tools = request.get("tools", [])
+                request_data = request
+            else:
+                # 无法处理的请求类型
+                log("Unsupported request type:", type(request))
+                return
+        except Exception as e:
+            log("Error parsing request:", str(e))
+            return
         
         token_count = 0
         
@@ -99,9 +121,15 @@ async def router(request: Any, response: Any, config: Dict[str, Any]):
                 if tool.get("input_schema"):
                     token_count += len(enc.encode(json.dumps(tool.get("input_schema"))))
         
-        model = get_use_model(request, token_count, config)
-        request["model"] = model
+        # 获取应该使用的模型，但不修改请求对象
+        model = get_use_model(request_data, token_count, config)
+        
+        # 如果有响应对象，可以将模型信息添加到响应中
+        if response and hasattr(response, "headers"):
+            response.headers["X-Selected-Model"] = model
+        
+        # 记录选择的模型
+        log(f"Selected model: {model}")
         
     except Exception as error:
         log("Error in router middleware:", str(error))
-        request["model"] = config.get("Router", {}).get("default", "")

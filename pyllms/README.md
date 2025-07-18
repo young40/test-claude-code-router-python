@@ -1,5 +1,97 @@
 # PyLLMs
 
+PyLLMs is a Python implementation of an LLM service for unified management and transformation of APIs from different LLM providers.
+
+[中文文档](#pyllms-中文)
+
+## Features
+
+- Support for multiple LLM providers (such as OpenAI, Anthropic, etc.)
+- Unified request and response format
+- Extensible transformer system
+- Support for streaming responses
+- Support for tool calls
+
+## Installation
+
+```bash
+# Install dependencies
+pip install fastapi uvicorn httpx python-dotenv
+
+# Clone repository
+git clone https://github.com/yourusername/pyllms.git
+cd pyllms
+```
+
+## Usage
+
+### Starting the Service
+
+```bash
+python main.py --port 3000 --host 127.0.0.1 --log
+```
+
+### Command Line Arguments
+
+- `--config`: Configuration file path (default: ./config.json)
+- `--port`: Service port (default: 3000)
+- `--host`: Service host address (default: 127.0.0.1)
+- `--log`: Enable logging
+- `--log-file`: Log file path (default: pyllms.log)
+
+### Configuration File Example
+
+```json
+{
+  "providers": [
+    {
+      "name": "openai",
+      "api_base_url": "https://api.openai.com/v1/chat/completions",
+      "api_key": "your-api-key",
+      "models": ["gpt-3.5-turbo", "gpt-4"]
+    },
+    {
+      "name": "anthropic",
+      "api_base_url": "https://api.anthropic.com/v1/messages",
+      "api_key": "your-api-key",
+      "models": ["claude-2", "claude-instant-1"]
+    }
+  ]
+}
+```
+
+## API Endpoints
+
+### Chat Completions
+
+- OpenAI compatible endpoint: `/v1/chat/completions`
+- Anthropic compatible endpoint: `/v1/messages`
+
+### Provider Management
+
+- Get all providers: `GET /providers`
+- Get specific provider: `GET /providers/{id}`
+- Create provider: `POST /providers`
+- Update provider: `PUT /providers/{id}`
+- Delete provider: `DELETE /providers/{id}`
+- Toggle provider status: `PATCH /providers/{id}/toggle`
+
+## Extension
+
+### Adding a New Transformer
+
+1. Create a new transformer file in the `src/transformer` directory
+2. Implement the `Transformer` interface
+3. Register the new transformer in `src/transformer/__init__.py`
+
+## License
+
+MIT
+
+---
+
+# PyLLMs (中文)
+
 PyLLMs 是一个 Python 实现的 LLM 服务，用于统一管理和转换不同 LLM 提供商的 API。
 
 ## 功能特点

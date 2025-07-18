@@ -14,6 +14,8 @@ from utils import init_config, init_dir
 from server import create_server
 from utils.router import router
 from middleware.auth import api_key_auth
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from utils.process_check import (
     cleanup_pid_file,
     is_service_running,
@@ -81,6 +83,37 @@ async def run(options: Optional[Dict[str, Any]] = None):
     # Use port from environment variable if set (for background process)
     service_port = int(os.environ.get("SERVICE_PORT", port))
     
+    # 创建一个独立的 FastAPI 应用程序，用于调试
+    debug_app = FastAPI()
+    
+    @debug_app.post("/v1/messages")
+    async def handle_messages(request: Request):
+        print(f"收到 /v1/messages 请求: {request.url}")
+        print(f"查询参数: {request.query_params}")
+        try:
+            body = await request.json()
+            print(f"请求体: {json.dumps(body, ensure_ascii=False)}")
+        except:
+            print("无法解析请求体")
+        
+        # 返回一个简单的响应
+        return JSONResponse(content={"message": "这是一个测试响应"})
+    
+    @debug_app.post("/v1/messages{path:path}")
+    async def handle_messages_with_path(request: Request, path: str):
+        print(f"收到 /v1/messages{path} 请求: {request.url}")
+        print(f"路径参数: {path}")
+        print(f"查询参数: {request.query_params}")
+        try:
+            body = await request.json()
+            print(f"请求体: {json.dumps(body, ensure_ascii=False)}")
+        except:
+            print("无法解析请求体")
+        
+        # 返回一个简单的响应
+        return JSONResponse(content={"message": "这是一个测试响应"})
+    
+    # 创建原始服务器
     server = create_server({
         "json_path": str(CONFIG_FILE),
         "initial_config": {
@@ -88,11 +121,34 @@ async def run(options: Optional[Dict[str, Any]] = None):
             "HOST": host,
             "PORT": service_port,
             "LOG_FILE": str(Path.home() / ".claude-code-router" / "claude-code-router.log"),
+            "debug_app": debug_app,  # 传递调试应用程序
         },
     })
     
-    server.add_hook("pre_handler", api_key_auth(config))
-    server.add_hook("pre_handler", lambda req, reply: asyncio.create_task(router(req, reply, config)))
+    # 创建一个适配器函数，使其与我们的中间件系统兼容
+    async def router_adapter(req, reply):
+        await router(req, reply, config)
+    
+    # 创建一个适配器函数，用于处理认证
+    async def auth_adapter(req, reply):
+        # 创建一个简单的响应对象
+        class SimpleResponse:
+            def __init__(self):
+                self.status_code = 200
+                self.body = None
+                self.headers = {}
+        
+        # 如果 reply 为 None，创建一个简单的响应对象
+        if reply is None:
+            reply = SimpleResponse()
+        
+        # 调用认证中间件
+        auth_middleware = api_key_auth(config)
+        await auth_middleware(req, reply)
+    
+    # 添加中间件，注意顺序很重要：先认证，再路由
+    server.add_hook("pre_handler", auth_adapter)
+    server.add_hook("pre_handler", router_adapter)
     
     try:
         # Start the server (now runs in a separate thread)

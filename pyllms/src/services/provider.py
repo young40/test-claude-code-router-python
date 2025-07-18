@@ -24,7 +24,8 @@ class ProviderService:
     
     def _initialize_custom_providers(self) -> None:
         """初始化自定义提供者"""
-        providers_config = self.config_service.get("providers")
+        # 尝试使用 "providers" 或 "Providers" 键
+        providers_config = self.config_service.get("providers") or self.config_service.get("Providers")
         if providers_config and isinstance(providers_config, list):
             self._initialize_from_providers_array(providers_config)
     

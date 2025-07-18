@@ -24,11 +24,36 @@ class ServerAdapter:
         # 如果是 FastAPI 的中间件，可以尝试添加
         if hook_type == "pre_handler" and hasattr(self.server, "app"):
             try:
+                # 使用一个更简单的中间件实现
                 @self.server.app.middleware("http")
                 async def middleware(request, call_next):
-                    # 调用处理函数
+                    # 简单地调用处理函数，然后继续处理请求
                     if callable(handler):
-                        await handler(request, None)
+                        try:
+                            # 创建一个简单的响应对象
+                            class SimpleResponse:
+                                def __init__(self):
+                                    self.status_code = 200
+                                    self.body = None
+                                    self.headers = {}
+                            
+                            response = SimpleResponse()
+                            
+                            # 调用处理函数
+                            await handler(request, response)
+                            
+                            # 如果设置了错误状态码，返回错误响应
+                            if response.status_code != 200:
+                                from starlette.responses import Response
+                                return Response(
+                                    content=response.body,
+                                    status_code=response.status_code,
+                                    headers=response.headers
+                                )
+                        except Exception as e:
+                            print(f"Error in middleware: {e}")
+                    
+                    # 继续处理请求
                     return await call_next(request)
             except Exception as e:
                 print(f"Failed to add middleware: {e}")
@@ -77,6 +102,20 @@ def create_server(config: dict) -> ServerAdapter:
     Returns:
         ServerAdapter: 服务器适配器实例
     """
+    # 检查是否有调试应用程序
+    debug_app = config.get("initial_config", {}).get("debug_app")
+    if debug_app:
+        print("使用调试应用程序")
+        
+        # 创建一个简单的服务器适配器
+        class SimpleServer:
+            def __init__(self):
+                self.app = debug_app
+                self.config_service = config.get("initial_config", {})
+        
+        # 返回适配器
+        return ServerAdapter(SimpleServer())
+    
     # 创建 ConfigOptions 对象
     options = ConfigOptions(
         initial_config=config.get("initial_config", {}),

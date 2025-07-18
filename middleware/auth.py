@@ -3,14 +3,14 @@ from typing import Any, Dict, Callable
 def api_key_auth(config: Dict[str, Any]) -> Callable:
     """API key authentication middleware"""
     
-    def auth_middleware(request, response, done: Callable):
+    async def auth_middleware(request, response):
         # Skip auth for health endpoints
-        if request.url in ["/", "/health"]:
-            return done()
+        if str(request.url).endswith("/") or str(request.url).endswith("/health"):
+            return
         
         api_key = config.get("APIKEY")
         if not api_key:
-            return done()
+            return
         
         # Get auth key from headers
         auth_key = request.headers.get("authorization") or request.headers.get("x-api-key")
@@ -30,7 +30,5 @@ def api_key_auth(config: Dict[str, Any]) -> Callable:
             response.status_code = 401
             response.body = "Invalid API key"
             return
-        
-        done()
     
     return auth_middleware

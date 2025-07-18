@@ -1,7 +1,50 @@
 from pyllms import Server
 from pyllms.src.services.config import ConfigOptions
+from typing import Dict, Any, Callable, List, Tuple
 
-def create_server(config: dict) -> Server:
+class ServerAdapter:
+    """
+    服务器适配器类，用于适配不同的 API
+    """
+    
+    def __init__(self, server: Server):
+        self.server = server
+        self.hooks: List[Tuple[str, Callable]] = []
+    
+    def add_hook(self, hook_type: str, handler: Callable) -> None:
+        """
+        添加钩子处理函数
+        
+        Args:
+            hook_type: 钩子类型
+            handler: 处理函数
+        """
+        self.hooks.append((hook_type, handler))
+        
+        # 如果是 FastAPI 的中间件，可以尝试添加
+        if hook_type == "pre_handler" and hasattr(self.server, "app"):
+            try:
+                @self.server.app.middleware("http")
+                async def middleware(request, call_next):
+                    # 调用处理函数
+                    if callable(handler):
+                        await handler(request, None)
+                    return await call_next(request)
+            except Exception as e:
+                print(f"Failed to add middleware: {e}")
+    
+    async def start(self) -> None:
+        """启动服务器"""
+        if hasattr(self.server, "start"):
+            if callable(self.server.start):
+                await self.server.start()
+            else:
+                print("Server.start is not callable")
+        else:
+            print("Server has no start method")
+
+
+def create_server(config: dict) -> ServerAdapter:
     """
     创建并返回一个服务器实例
     
@@ -9,7 +52,7 @@ def create_server(config: dict) -> Server:
         config: 服务器配置字典
         
     Returns:
-        Server: 服务器实例
+        ServerAdapter: 服务器适配器实例
     """
     # 创建 ConfigOptions 对象
     options = ConfigOptions(
@@ -23,4 +66,6 @@ def create_server(config: dict) -> Server:
     
     # 创建服务器实例
     server = Server(options)
-    return server
+    
+    # 创建并返回适配器
+    return ServerAdapter(server)

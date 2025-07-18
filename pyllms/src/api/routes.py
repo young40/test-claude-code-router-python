@@ -34,19 +34,22 @@ def register_api_routes(app: FastAPI) -> None:
         transformer = item["transformer"]
         
         if hasattr(transformer, 'end_point') and transformer.end_point:
-            log(f"Registering endpoint for transformer {name}: {transformer.end_point}")
+            endpoint = transformer.end_point
+            if not isinstance(endpoint, str):
+                endpoint = f"/{name.lower()}"
+            log(f"Registering endpoint for transformer {name}: {endpoint}")
             
             # Use a factory function to ensure each route handler has the correct transformer reference
             def create_endpoint_handler(transformer_instance=transformer):
                 async def handle_endpoint(request: Request):
-                    log(f"Processing {transformer_instance.end_point} request using transformer: {transformer_instance.name if hasattr(transformer_instance, 'name') else 'unknown'}")
+                    log(f"Processing {endpoint} request using transformer: {transformer_instance.name if hasattr(transformer_instance, 'name') else 'unknown'}")
                     return await process_transformer_request(request, transformer_instance)
                 return handle_endpoint
             
             # Register the endpoint
             endpoint_handler = create_endpoint_handler()
             app.add_api_route(
-                transformer.end_point, 
+                endpoint, 
                 endpoint_handler, 
                 methods=["POST"]
             )

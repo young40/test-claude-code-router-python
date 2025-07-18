@@ -8,65 +8,109 @@ from ..types.transformer import Transformer, TransformerConstructor
 
 
 class TransformerService:
-    """转换器服务类，负责管理转换器"""
+    """Transformer service class, responsible for managing transformers"""
     
     def __init__(self, config_service: ConfigService):
         self.config_service = config_service
         self.transformers: Dict[str, Union[Transformer, TransformerConstructor]] = {}
     
     def register_transformer(self, name: str, transformer: Union[Transformer, TransformerConstructor]) -> None:
-        """注册转换器"""
+        """Register a transformer"""
+        # If it's a class and not an instance, try to instantiate it
+        if not hasattr(transformer, 'end_point') and callable(transformer):
+            try:
+                # Try to instantiate the transformer class
+                instance = transformer()
+                self.transformers[name] = instance
+                endpoint_info = f" (endpoint: {instance.end_point})" if hasattr(instance, 'end_point') and instance.end_point else " (no endpoint)"
+                log(f"register transformer: {name}{endpoint_info}")
+                return
+            except Exception as e:
+                # If instantiation fails, register the class as is
+                log(f"Error instantiating transformer {name}: {e}")
+        
+        # Register the transformer as is
         self.transformers[name] = transformer
         endpoint_info = f" (endpoint: {transformer.end_point})" if hasattr(transformer, 'end_point') and transformer.end_point else " (no endpoint)"
         log(f"register transformer: {name}{endpoint_info}")
     
     def get_transformer(self, name: str) -> Optional[Union[Transformer, TransformerConstructor]]:
-        """获取转换器"""
+        """Get a transformer by name"""
         return self.transformers.get(name)
     
     def get_all_transformers(self) -> Dict[str, Union[Transformer, TransformerConstructor]]:
-        """获取所有转换器"""
+        """Get all transformers"""
         return self.transformers.copy()
     
     def get_transformers_with_endpoint(self) -> List[Dict[str, Any]]:
-        """获取带有端点的转换器"""
+        """Get transformers with endpoints"""
         result = []
         
         for name, transformer in self.transformers.items():
+            # Check if the transformer is an instance with an endpoint
             if hasattr(transformer, 'end_point') and transformer.end_point:
                 result.append({"name": name, "transformer": transformer})
+            # Check if it's a transformer class that needs to be instantiated
+            elif not hasattr(transformer, 'end_point'):
+                try:
+                    # Try to instantiate the transformer class
+                    instance = transformer()
+                    if hasattr(instance, 'end_point') and instance.end_point:
+                        # Register the instance instead of the class
+                        self.transformers[name] = instance
+                        result.append({"name": name, "transformer": instance})
+                except Exception as e:
+                    # Log the error but continue processing other transformers
+                    from ..utils.log import log
+                    log(f"Error instantiating transformer {name}: {e}")
         
         return result
     
     def get_transformers_without_endpoint(self) -> List[Dict[str, Any]]:
-        """获取没有端点的转换器"""
+        """Get transformers without endpoints"""
         result = []
         
         for name, transformer in self.transformers.items():
-            if not hasattr(transformer, 'end_point') or not transformer.end_point:
+            # Check if the transformer is an instance without an endpoint
+            if hasattr(transformer, 'end_point') and not transformer.end_point:
                 result.append({"name": name, "transformer": transformer})
+            # Check if it's a transformer class that needs to be instantiated
+            elif not hasattr(transformer, 'end_point'):
+                try:
+                    # Try to instantiate the transformer class
+                    instance = transformer()
+                    if not hasattr(instance, 'end_point') or not instance.end_point:
+                        # For consistency, register the instance instead of the class
+                        self.transformers[name] = instance
+                        result.append({"name": name, "transformer": instance})
+                except Exception as e:
+                    # If we can't instantiate, consider it as without endpoint
+                    result.append({"name": name, "transformer": transformer})
+                    # Log the error but continue processing other transformers
+                    from ..utils.log import log
+                    log(f"Error instantiating transformer {name}: {e}")
         
         return result
     
     def remove_transformer(self, name: str) -> bool:
-        """移除转换器"""
+        """Remove a transformer"""
         if name in self.transformers:
             del self.transformers[name]
             return True
         return False
     
     def has_transformer(self, name: str) -> bool:
-        """检查转换器是否存在"""
+        """Check if a transformer exists"""
         return name in self.transformers
     
     async def register_transformer_from_config(self, config: Dict[str, Any]) -> bool:
-        """从配置注册转换器"""
+        """Register a transformer from configuration"""
         try:
             if config.get("path"):
-                # 动态导入模块
+                # Dynamically import the module
                 module = importlib.import_module(config["path"])
                 if module:
-                    # 创建实例
+                    # Create an instance
                     instance = module.Transformer(config.get("options", {}))
                     if not hasattr(instance, 'name'):
                         raise ValueError(f"Transformer instance from {config['path']} does not have a name property.")
@@ -78,36 +122,46 @@ class TransformerService:
             log(f"load transformer ({config.get('path')}) error:", error)
             return False
     
-    def initialize(self) -> None:
-        """初始化转换器服务"""
+    async def initialize(self) -> None:
+        """Initialize the transformer service"""
         try:
-            # 注册默认转换器
-            self.register_default_transformers()
+            # Register default transformers
+            await self.register_default_transformers_internal()
             
-            # 从配置加载转换器
-            self.load_from_config()
+            # Load transformers from configuration
+            await self.load_from_config()
         except Exception as error:
             log("TransformerService init error:", error)
     
-    def register_default_transformers(self) -> None:
-        """注册默认转换器"""
+    async def register_default_transformers_internal(self) -> None:
+        """Register default transformers internally"""
         try:
-            # 导入转换器模块
+            # Import transformer module
             from ..transformer import transformers
             
-            # 注册所有转换器
-            for transformer_class in transformers.values():
+            # Register all transformers
+            for transformer_name, transformer_class in transformers.items():
                 if hasattr(transformer_class, 'TransformerName') and isinstance(transformer_class.TransformerName, str):
+                    # Register the transformer class with its static name
                     self.register_transformer(transformer_class.TransformerName, transformer_class)
                 else:
-                    transformer_instance = transformer_class()
-                    if hasattr(transformer_instance, 'name'):
-                        self.register_transformer(transformer_instance.name, transformer_instance)
+                    try:
+                        # Create an instance and register it
+                        transformer_instance = transformer_class()
+                        if hasattr(transformer_instance, 'name') and transformer_instance.name:
+                            self.register_transformer(transformer_instance.name, transformer_instance)
+                        else:
+                            # Use the transformer_name as fallback
+                            self.register_transformer(transformer_name, transformer_instance)
+                    except Exception as e:
+                        log(f"Error instantiating transformer {transformer_name}: {e}")
+                        # Register the class directly if instantiation fails
+                        self.register_transformer(transformer_name, transformer_class)
         except Exception as error:
             log("transformer regist error:", error)
     
-    def load_from_config(self) -> None:
-        """从配置加载转换器"""
+    async def load_from_config(self) -> None:
+        """Load transformers from configuration"""
         transformers_config = self.config_service.get("transformers", [])
         for transformer_config in transformers_config:
-            self.register_transformer_from_config(transformer_config)
+            await self.register_transformer_from_config(transformer_config)

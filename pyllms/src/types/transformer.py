@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, Protocol
+from typing import Dict, Any, Optional, Protocol, Union
 from abc import ABC, abstractmethod
 import httpx
 
@@ -10,7 +10,7 @@ class TransformerOptions(Dict[str, Any]):
 
 
 class Transformer(ABC):
-    """转换器基类"""
+    """Transformer base class"""
     
     def __init__(self, options: Optional[TransformerOptions] = None):
         self.options = options or {}
@@ -22,26 +22,26 @@ class Transformer(ABC):
         request: UnifiedChatRequest, 
         provider: LLMProvider
     ) -> Dict[str, Any]:
-        """将统一请求格式转换为提供者特定格式"""
-        return request.__dict__
+        """Transform unified request format to provider-specific format"""
+        return request.__dict__ if hasattr(request, '__dict__') else request
     
     async def transform_response_in(self, response: httpx.Response) -> httpx.Response:
-        """转换响应输入"""
+        """Transform response input"""
         return response
     
-    async def transform_request_out(self, request: Any) -> UnifiedChatRequest:
-        """将提供者特定格式转换为统一请求格式"""
+    async def transform_request_out(self, request: Any) -> Union[UnifiedChatRequest, Dict[str, Any]]:
+        """Transform provider-specific format to unified request format"""
         if isinstance(request, dict):
             return UnifiedChatRequest(**request)
         return request
     
     async def transform_response_out(self, response: httpx.Response) -> httpx.Response:
-        """转换响应输出"""
+        """Transform response output"""
         return response
 
 
 class TransformerConstructor(Protocol):
-    """转换器构造器协议"""
+    """Transformer constructor protocol"""
     
     def __call__(self, options: Optional[TransformerOptions] = None) -> Transformer:
         ...
@@ -52,5 +52,5 @@ class TransformerConstructor(Protocol):
 
 
 class TransformerWithStaticName(Transformer):
-    """带有静态名称的转换器"""
+    """Transformer with static name"""
     TransformerName: Optional[str] = None

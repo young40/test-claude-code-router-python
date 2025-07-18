@@ -12,9 +12,9 @@ from .middleware import create_api_error
 
 
 def register_api_routes(app: FastAPI) -> None:
-    """注册API路由"""
+    """Register API routes"""
     
-    # 健康检查和信息端点
+    # Health check and info endpoints
     @app.get("/")
     async def root():
         return {"message": "LLMs API", "version": "1.0.0"}
@@ -23,38 +23,62 @@ def register_api_routes(app: FastAPI) -> None:
     async def health():
         return {"status": "ok", "timestamp": datetime.now().isoformat()}
     
-    # 获取转换器列表
+    # Get transformers with endpoints
     transformers_with_endpoint = app.state._server.transformer_service.get_transformers_with_endpoint()
-    log(f"可用的转换器: {[item['name'] for item in transformers_with_endpoint]}")
+    log(f"Available transformers: {[item['name'] for item in transformers_with_endpoint]}")
     
-    # 不再注册特定端点，只使用通配符路由
+    # Register specific routes for each transformer with an endpoint
+    for item in transformers_with_endpoint:
+        name = item["name"]
+        transformer = item["transformer"]
+        
+        if hasattr(transformer, 'end_point') and transformer.end_point:
+            log(f"Registering endpoint for transformer {name}: {transformer.end_point}")
+            
+            # Use a factory function to ensure each route handler has the correct transformer reference
+            def create_endpoint_handler(transformer_instance=transformer):
+                async def handle_endpoint(request: Request):
+                    log(f"Processing {transformer_instance.end_point} request using transformer: {transformer_instance.name if hasattr(transformer_instance, 'name') else 'unknown'}")
+                    return await process_transformer_request(request, transformer_instance)
+                return handle_endpoint
+            
+            # Register the endpoint
+            endpoint_handler = create_endpoint_handler()
+            app.add_api_route(
+                transformer.end_point, 
+                endpoint_handler, 
+                methods=["POST"]
+            )
     
-    # 添加一个通配符路由，捕获所有请求
+    # Add a wildcard route as fallback to catch all unmatched requests
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
     async def catch_all(request: Request, path: str):
-        log(f"捕获到请求: {request.method} {request.url}")
-        log(f"路径: {path}")
-        log(f"查询参数: {request.query_params}")
-        log(f"请求头: {request.headers}")
+        log(f"Caught unmatched request: {request.method} {request.url}")
+        log(f"Path: {path}")
         
-        # 如果是 /v1/messages 请求，尝试处理
-        if path == "v1/messages" or path.startswith("v1/messages"):
-            log("尝试处理 Anthropic 请求")
-            
-            # 获取 Anthropic 转换器
-            anthropic_transformer = None
-            for item in transformers_with_endpoint:
-                if item["name"] == "Anthropic":
-                    anthropic_transformer = item["transformer"]
-                    log(f"找到 Anthropic 转换器: {anthropic_transformer}")
-                    break
-            
-            if anthropic_transformer:
-                log("调用 process_transformer_request 处理请求")
-                return await process_transformer_request(request, anthropic_transformer)
+        # Try to find a matching transformer
+        transformers_with_endpoint = app.state._server.transformer_service.get_transformers_with_endpoint()
         
-        # 返回 404 错误，但包含详细信息
-        log(f"未找到匹配的路由: {path}")
+        # Keep track of registered endpoints to avoid duplicates
+        registered_endpoints = set()
+        for route in app.routes:
+            if hasattr(route, "path"):
+                registered_endpoints.add(route.path.lstrip('/'))
+        
+        for item in transformers_with_endpoint:
+            transformer = item["transformer"]
+            if hasattr(transformer, 'end_point'):
+                # Remove leading slash for comparison
+                endpoint = transformer.end_point.lstrip('/')
+                request_path = path.lstrip('/')
+                
+                # Only process if this endpoint wasn't explicitly registered
+                if endpoint not in registered_endpoints and (request_path == endpoint or request_path.startswith(f"{endpoint}/")):
+                    log(f"Found matching transformer in wildcard route: {item['name']}")
+                    return await process_transformer_request(request, transformer)
+        
+        # Return 404 error
+        log(f"No matching route found: {path}")
         return Response(
             content=f'{{"error": "Not Found", "path": "{path}", "method": "{request.method}"}}',
             status_code=404,

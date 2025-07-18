@@ -18,14 +18,7 @@ from utils.code_command import execute_code_command
 from utils.process_check import cleanup_pid_file, is_service_running
 from constants import PID_FILE, REFERENCE_COUNT_FILE
 
-# Get version from package.json if available
-try:
-    package_json_path = Path(__file__).parent.parent / "package.json"
-    with open(package_json_path, 'r') as f:
-        package_data = json.load(f)
-        VERSION = package_data.get("version", "1.0.0")
-except (FileNotFoundError, json.JSONDecodeError):
-    VERSION = "1.0.0"
+VERSION = "1.0.0"
 
 HELP_TEXT = f"""
 Usage: python3 cli.py [command]

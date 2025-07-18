@@ -35,24 +35,36 @@ class ServerAdapter:
     
     async def start(self) -> None:
         """启动服务器"""
-        if hasattr(self.server, "start"):
-            if callable(self.server.start):
-                # 直接在当前线程中启动服务器
-                try:
-                    print("✅ Server started on {}:{}".format(
-                        self.server.config_service.get("HOST", "127.0.0.1"),
-                        self.server.config_service.get("PORT", "3000")
-                    ))
-                    print("Press Ctrl+C to stop the server")
-                    await self.server.start()
-                except KeyboardInterrupt:
-                    print("\nServer stopped by user")
-                except Exception as e:
-                    print(f"Error starting server: {e}")
-            else:
-                print("Server.start is not callable")
+        if hasattr(self.server, "app"):
+            # 直接使用 FastAPI 应用
+            import uvicorn
+            import asyncio
+            import threading
+            
+            host = self.server.config_service.get("HOST", "127.0.0.1")
+            port = int(self.server.config_service.get("PORT", "3000"))
+            
+            print(f"✅ Server started on {host}:{port}")
+            print("Press Ctrl+C to stop the server")
+            
+            # 创建一个新的线程来运行服务器
+            def run_server():
+                uvicorn.run(
+                    self.server.app,
+                    host=host,
+                    port=port,
+                    log_level="info"
+                )
+            
+            # 在新线程中启动服务器
+            server_thread = threading.Thread(target=run_server)
+            server_thread.daemon = True
+            server_thread.start()
+            
+            # 等待一段时间，确保服务器已经启动
+            await asyncio.sleep(1)
         else:
-            print("Server has no start method")
+            print("Server has no app attribute")
 
 
 def create_server(config: dict) -> ServerAdapter:

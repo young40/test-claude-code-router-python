@@ -195,8 +195,23 @@ def register_api_routes(app: FastAPI) -> None:
             response = await send_unified_request(url, request_body, request_config)
             
             # Handle error responses
+            if isinstance(response, str):
+                error_text = response
+                log(f"Error response: {error_text}")
+                raise create_api_error(
+                    f"Error from provider: {error_text}",
+                    500,
+                    "provider_error"
+                )
             if response.status_code != 200:
-                error_text = await response.text()
+                if hasattr(response, "aiter_text") and callable(response.aiter_text):
+                    error_text = ""
+                    async for chunk in response.aiter_text():
+                        error_text += chunk
+                elif hasattr(response, "text") and isinstance(response.text, str):
+                    error_text = response.text
+                else:
+                    error_text = str(response)
                 log(f"Error response from {url}: {error_text}")
                 raise create_api_error(
                     f"Error from provider: {error_text}",

@@ -95,11 +95,16 @@ async def send_unified_request(
         try:
             async with httpx.AsyncClient(**request_options) as client:
                 if is_stream:
-                    # For streaming requests, we need to use stream=True to get a proper streaming response
-                    response = await client.post(url, content=body, stream=True)
+                    async with client.stream("POST", url, content=body) as response:
+                        # 读取所有内容（错误或正常流）
+                        content = ""
+                        async for chunk in response.aiter_text():
+                            content += chunk
+                        # 构造一个简单的 httpx.Response-like 对象或直接返回内容
+                        return content
                 else:
                     response = await client.post(url, content=body)
-                return response
+                    return response
         except httpx.RequestError as e:
             log(f"Request error: {e}")
             from ..api.middleware import create_api_error
